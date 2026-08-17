@@ -67,4 +67,6 @@ Bearer Token 只存在于请求链路中，不进入运行记录。评测前先�
 
 ## 6. 首轮 Pilot 的判定边界
 
-首轮 Pilot 使用确定性断言检查决策、原因码、引用、必含事实和禁止内容，再把失败映射到业务节点。它不使用 Prompt Candidate，也不自动修改目标系统。只有 Baseline 形成后，才能选择回答 Prompt、检索、Rerank、语料或规则中的一个变量做后续实验。
+首轮 Pilot 使用确定性断言检查决策、原因码、引用、必含事实和禁止内容，再把失败映射到业务节点。答案里出现正确关键词并不代表 RAG 正确，因此样本还能声明 `required_document_ids`、`forbidden_document_ids`、`allowed_dataset_ids` 和 `minimum_distinct_documents`。这些字段形成证据覆盖与数据集边界门禁，并把缺文档问题归因到 Retrieval，而不是错误地建议修改 Prompt。
+
+它不使用 Prompt Candidate，也不自动修改目标系统。只有 Baseline 形成后，才能选择回答 Prompt、检索、Rerank、语料或规则中的一个变量做后续实验。两次运行只有在 Target 与 Dataset Snapshot 相同时才允许直接比较；平台同时展示 Gate 迁移、指标差值、已修复用例和新增退化。

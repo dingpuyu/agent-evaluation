@@ -23,7 +23,21 @@
 .pilot-progress header b { font-size: 11px; }
 .pilot-progress-track { height: 7px; margin-top: 12px; overflow: hidden; border-radius: 99px; background: #ffffff16; }
 .pilot-progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--mint); transition: width .25s ease; }
-.pilot-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+.pilot-comparison { margin-top: 10px; padding: 14px; border-radius: 12px; background: var(--dark); color: #fff; }
+.pilot-comparison > header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.pilot-comparison > header div { display: grid; gap: 4px; }
+.pilot-comparison > header small { color: #aebbb6; font: 8px var(--mono); }
+.pilot-comparison > header b { color: var(--lime); font-size: 16px; }
+.pilot-comparison > header code { color: #93a39d; font-size: 7px; overflow-wrap: anywhere; text-align: right; }
+.pilot-comparison-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 12px; }
+.pilot-comparison-grid div { padding: 10px; border: 1px solid #ffffff17; border-radius: 9px; background: #ffffff08; display: grid; gap: 5px; }
+.pilot-comparison-grid small { color: #93a39d; font: 7px var(--mono); }
+.pilot-comparison-grid b { font-size: 11px; }
+.pilot-comparison-grid span { color: var(--lime); font: 8px var(--mono); }
+.pilot-comparison footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: #c8d3cf; font-size: 8px; }
+.pilot-comparison footer .stable { color: var(--lime); }
+.pilot-comparison footer .regressed { color: #ff9878; }
+.pilot-metrics { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 10px; }
 .pilot-metrics div { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: grid; gap: 5px; }
 .pilot-metrics small { font: 8px var(--mono); color: var(--muted); }
 .pilot-metrics b { font-size: 17px; }
@@ -41,5 +55,8 @@
 
 @media (max-width: 900px) {
   .pilot-contract { grid-template-columns: 1fr; }
+  .pilot-comparison > header { align-items: flex-start; flex-direction: column; }
+  .pilot-comparison > header code { text-align: left; }
+  .pilot-comparison-grid { grid-template-columns: 1fr 1fr; }
   .pilot-metrics { grid-template-columns: 1fr 1fr; }
 }

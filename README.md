@@ -50,6 +50,7 @@ Pilot 是异步运行：创建请求立即返回 `202`，网页和脚本轮询�
 - `GET /api/v1/plans/raglab-medical-sales-baseline-v1`：冻结业务链路、指标、数据集与门禁。
 - `POST /api/v1/pilots/raglab-medical-sales-baseline-v1/runs`：创建完整基线运行。
 - `GET /api/v1/pilots/{pilot_run_id}`：查询逐题进度、门禁和干预建议。
+- `GET /api/v1/pilots/compare?baseline_id=...&candidate_id=...`：比较同一目标、同一数据快照的两次运行，返回指标增量、已修复用例和新增退化。
 - `POST /api/v1/experiments/prompt-comparisons`：在回答节点执行 Baseline/Candidate 对照。
 
 所有平台资产都经过目标系统身份校验，并按租户隔离。
@@ -66,4 +67,4 @@ Pilot 是异步运行：创建请求立即返回 `202`，网页和脚本轮询�
 
 详细设计见 [架构与业务闭环](docs/architecture.md) 和 [开发节奏](docs/roadmap.md)。
 
-首次真实试点及一次 Evaluation False Positive 的发现、修复和复测过程见 [首轮试点报告](docs/first-pilot-report.md)。
+首次真实试点及一次 Evaluation False Positive 的发现、修复和复测过程见 [首轮试点报告](docs/first-pilot-report.md)。答案级指标进一步升级为证据级门禁并推动 RAG 修复的过程见 [证据覆盖优化报告](docs/evidence-retrieval-optimization.md)。

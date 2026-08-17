@@ -51,7 +51,10 @@ export async function runPromptCase(
   });
   const result = responseResult(payload);
   const answer = String(result.answer ?? "");
-  const citations = Array.isArray(result.citations) ? result.citations.length : 0;
+  const rawCitations = Array.isArray(result.citations) ? result.citations as Array<Record<string, unknown>> : [];
+  const citations = rawCitations.length;
+  const citationDocumentIDs = [...new Set(rawCitations.map((item) => String(item.document_id ?? "")).filter(Boolean))];
+  const citationDatasetIDs = [...new Set(rawCitations.map((item) => String(item.dataset_id ?? "")).filter(Boolean))];
   const lowerAnswer = normalized(answer);
   const required = item.required_answer_any ?? [];
   const forbidden = item.forbidden_answer_any ?? [];
@@ -59,6 +62,10 @@ export async function runPromptCase(
     decision: String(result.decision ?? "") === item.expected_decision,
     reason: !item.expected_reason || String(result.reason_code ?? "") === item.expected_reason,
     citations: citations >= (item.minimum_citations ?? 0),
+    documents: (item.required_document_ids ?? []).every((documentID) => citationDocumentIDs.includes(documentID))
+      && (item.forbidden_document_ids ?? []).every((documentID) => !citationDocumentIDs.includes(documentID))
+      && citationDocumentIDs.length >= (item.minimum_distinct_documents ?? 0),
+    datasets: !item.allowed_dataset_ids?.length || citationDatasetIDs.every((datasetID) => item.allowed_dataset_ids?.includes(datasetID)),
     required_answer: required.length === 0 || required.some((term) => lowerAnswer.includes(normalized(term))),
     forbidden_answer: forbidden.every((term) => !containsUnnegatedClaim(lowerAnswer, term)),
   };
@@ -71,6 +78,8 @@ export async function runPromptCase(
     reason_code: String(result.reason_code ?? ""),
     answer,
     citations,
+    citation_document_ids: citationDocumentIDs,
+    citation_dataset_ids: citationDatasetIDs,
     latency_ms: Math.round(performance.now() - started),
     passed: Object.values(checks).every(Boolean),
     checks,
@@ -85,6 +94,8 @@ export function summarizePromptResults(results: PromptCaseResult[], cases: Produ
     pass_rate: results.filter((item) => item.passed).length / Math.max(1, results.length),
     decision_accuracy: results.filter((item) => item.checks.decision).length / Math.max(1, results.length),
     citation_compliance: results.filter((item) => item.checks.citations).length / Math.max(1, results.length),
+    evidence_coverage: results.filter((item) => item.checks.documents).length / Math.max(1, results.length),
+    dataset_compliance: results.filter((item) => item.checks.datasets).length / Math.max(1, results.length),
     // A suite without safety-critical cases is "not applicable", not a failed
     // safety gate. Dataset provenance still shows which cases were executed.
     safety_pass_rate: safetyResults.length
@@ -124,7 +135,7 @@ export async function runPromptExperiment(input: {
     else if (previous?.passed && !item.passed) regressedCases.push(item.case_id);
     else unchangedCases.push(item.case_id);
   }
-  const keys: Array<keyof PromptExperimentSummary> = ["pass_rate", "decision_accuracy", "citation_compliance", "safety_pass_rate", "average_latency_ms"];
+  const keys: Array<keyof PromptExperimentSummary> = ["pass_rate", "decision_accuracy", "citation_compliance", "evidence_coverage", "dataset_compliance", "safety_pass_rate", "average_latency_ms"];
   const delta = Object.fromEntries(keys.map((key) => [key, candidate[key] - baseline[key]])) as Record<keyof PromptExperimentSummary, number>;
   const recommendation = regressedCases.length > 0
     ? `Reject candidate: ${regressedCases.length} regression(s) detected; inspect case-level evidence before revising the prompt.`

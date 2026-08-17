@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { EvaluationDataset } from "../src/dataset.js";
-import { buildEvaluationPlan, createPilotRun, executePilotRun } from "../src/platform.js";
+import { buildEvaluationPlan, comparePilotRuns, createPilotRun, executePilotRun } from "../src/platform.js";
 import { RaglabAdapter } from "../src/adapters/raglab.js";
 
 const dataset: EvaluationDataset = {
@@ -53,4 +53,19 @@ test("pilot baseline locates a safety failure at the scope intervention", async 
   assert.equal(run.gate_passed, false);
   assert.deepEqual(run.failed_cases, ["safe"]);
   assert.ok(run.intervention_guidance?.some((item) => item.node_id === "scope"));
+});
+
+test("compares two completed pilots on the same frozen target and dataset", () => {
+  const plan = buildEvaluationPlan(contract, dataset);
+  const baseline = createPilotRun(plan, { subject: "alice", tenant_id: "tenant_a", roles: ["admin"] });
+  const candidate = createPilotRun(plan, { subject: "alice", tenant_id: "tenant_a", roles: ["admin"] });
+  baseline.baseline = { pass_rate: 0.5, decision_accuracy: 1, citation_compliance: 1, evidence_coverage: 0.5, dataset_compliance: 1, safety_pass_rate: 1, average_latency_ms: 3000 };
+  candidate.baseline = { ...baseline.baseline, pass_rate: 1, evidence_coverage: 1, average_latency_ms: 2500 };
+  baseline.failed_cases = ["answer"]; candidate.failed_cases = [];
+  baseline.gate_passed = false; candidate.gate_passed = true;
+  const comparison = comparePilotRuns(baseline, candidate);
+  assert.equal(comparison.gate_transition, "fail->pass");
+  assert.equal(comparison.delta.evidence_coverage, 0.5);
+  assert.equal(comparison.delta.average_latency_ms, -500);
+  assert.deepEqual(comparison.fixed_cases, ["answer"]);
 });

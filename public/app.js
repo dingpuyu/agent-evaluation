@@ -53,6 +53,28 @@ function renderPlan() {
   $("#planGates").innerHTML = plan.gates.map((gate) => `<span>${h(gate.metric)} ≥ ${gate.threshold} ${gate.hard ? "· HARD" : "· QUALITY"}</span>`).join("");
 }
 
+function renderPilotComparison(run) {
+  const previous = state.pilots.find((item) => item.pilot_run_id !== run.pilot_run_id && item.status === "completed" && item.target_id === run.target_id && item.dataset_id === run.dataset_id && item.baseline);
+  if (!previous?.baseline || !run.baseline) return "";
+  const delta = (key) => Number(run.baseline[key] || 0) - Number(previous.baseline[key] || 0);
+  const signedPoints = (value) => `${value >= 0 ? "+" : ""}${Math.round(value * 1000) / 10}pp`;
+  const latencyDelta = Math.round(delta("average_latency_ms"));
+  const oldFailures = new Set(previous.failed_cases || []);
+  const newFailures = new Set(run.failed_cases || []);
+  const fixedCases = [...oldFailures].filter((caseID) => !newFailures.has(caseID));
+  const regressions = [...newFailures].filter((caseID) => !oldFailures.has(caseID));
+  return `<section class="pilot-comparison">
+    <header><div><small>同数据快照 · 前后版本对照</small><b>${previous.gate_passed ? "PASS" : "FAIL"} → ${run.gate_passed ? "PASS" : "FAIL"}</b></div><code>${h(previous.pilot_run_id)} → ${h(run.pilot_run_id)}</code></header>
+    <div class="pilot-comparison-grid">
+      <div><small>OVERALL</small><b>${pct(previous.baseline.pass_rate)} → ${pct(run.baseline.pass_rate)}</b><span>${signedPoints(delta("pass_rate"))}</span></div>
+      <div><small>EVIDENCE</small><b>${pct(previous.baseline.evidence_coverage)} → ${pct(run.baseline.evidence_coverage)}</b><span>${signedPoints(delta("evidence_coverage"))}</span></div>
+      <div><small>DATASET SCOPE</small><b>${pct(previous.baseline.dataset_compliance)} → ${pct(run.baseline.dataset_compliance)}</b><span>${signedPoints(delta("dataset_compliance"))}</span></div>
+      <div><small>AVG LATENCY</small><b>${Math.round(previous.baseline.average_latency_ms)} → ${Math.round(run.baseline.average_latency_ms)}ms</b><span>${latencyDelta >= 0 ? "+" : ""}${latencyDelta}ms</span></div>
+    </div>
+    <footer><span>已修复：${h(fixedCases.join("、") || "无")}</span><span class="${regressions.length ? "regressed" : "stable"}">新增退化：${h(regressions.join("、") || "无")}</span></footer>
+  </section>`;
+}
+
 function renderPilot(run) {
   const button = $("#runPilot");
   if (!run) {
@@ -75,7 +97,7 @@ function renderPilot(run) {
   const summary = run.baseline || {};
   const gateRows = (run.gates || []).map((gate) => `<div class="${gate.passed ? "pass" : "fail"}"><b>${h(gate.metric)}</b><span>${gate.metric === "average_latency_ms" ? Math.round(gate.actual) : pct(gate.actual)}</span><span>目标 ${gate.threshold}</span></div>`).join("");
   const guidance = (run.intervention_guidance || []).map((item) => `<article><header><code>${h(item.node_id)}</code><b>${h(item.finding)}</b></header><p>${h(item.recommended_intervention)}</p><small>影响用例：${h(item.affected_cases.join("、"))}</small></article>`).join("");
-  $("#pilotResult").innerHTML = `<div class="recommendation">${run.gate_passed ? "首轮质量门禁通过，可进入候选策略实验。" : `首轮门禁未通过：${run.failed_cases?.length || 0} 条失败。先按节点修复，再做 Prompt A/B。`}</div><div class="pilot-metrics"><div><small>OVERALL PASS</small><b>${pct(summary.pass_rate)}</b></div><div><small>DECISION</small><b>${pct(summary.decision_accuracy)}</b></div><div><small>CITATION</small><b>${pct(summary.citation_compliance)}</b></div><div><small>SAFETY</small><b>${pct(summary.safety_pass_rate)}</b></div><div><small>AVG LATENCY</small><b>${Math.round(summary.average_latency_ms || 0)}ms</b></div></div><div class="pilot-gate-results">${gateRows}</div><div class="pilot-guidance">${guidance || `<div class="empty">当前样本未发现需要定位的失败节点。</div>`}</div>`;
+  $("#pilotResult").innerHTML = `<div class="recommendation">${run.gate_passed ? "首轮质量门禁通过，可进入候选策略实验。" : `首轮门禁未通过：${run.failed_cases?.length || 0} 条失败。先按节点修复，再做 Prompt A/B。`}</div>${renderPilotComparison(run)}<div class="pilot-metrics"><div><small>OVERALL PASS</small><b>${pct(summary.pass_rate)}</b></div><div><small>DECISION</small><b>${pct(summary.decision_accuracy)}</b></div><div><small>CITATION COUNT</small><b>${pct(summary.citation_compliance)}</b></div><div><small>EVIDENCE COVERAGE</small><b>${pct(summary.evidence_coverage)}</b></div><div><small>DATASET SCOPE</small><b>${pct(summary.dataset_compliance)}</b></div><div><small>SAFETY</small><b>${pct(summary.safety_pass_rate)}</b></div><div><small>AVG LATENCY</small><b>${Math.round(summary.average_latency_ms || 0)}ms</b></div></div><div class="pilot-gate-results">${gateRows}</div><div class="pilot-guidance">${guidance || `<div class="empty">当前样本未发现需要定位的失败节点。</div>`}</div>`;
 }
 
 function renderContract() {

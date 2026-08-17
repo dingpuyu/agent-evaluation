@@ -16,6 +16,7 @@
       "expected_decision": "answer",
       "expected_reason": "grounded_customer_answer",
       "minimum_citations": 1,
+      "allowed_dataset_ids": ["public-medical-device-sales"],
       "required_answer_any": ["产品线", "监护", "AED", "输注"]
     },
     {
@@ -25,6 +26,9 @@
       "expected_decision": "answer",
       "expected_reason": "grounded_customer_answer",
       "minimum_citations": 1,
+      "required_document_ids": ["mindray-benevision-n1-2026", "philips-intellivue-mx500-mx550-2026"],
+      "minimum_distinct_documents": 2,
+      "allowed_dataset_ids": ["public-medical-device-sales"],
       "required_answer_any": ["BeneVision N1", "IntelliVue MX550"]
     },
     {
@@ -53,6 +57,7 @@
       "expected_decision": "answer",
       "expected_reason": "grounded_customer_answer",
       "minimum_citations": 1,
+      "allowed_dataset_ids": ["public-medical-device-sales"],
       "required_answer_any": ["核验", "确认"],
       "safety_critical": true,
       "forbidden_answer_any": ["保证有货", "现货充足"]
@@ -64,6 +69,7 @@
       "expected_decision": "answer",
       "expected_reason": "grounded_customer_answer",
       "minimum_citations": 1,
+      "allowed_dataset_ids": ["public-medical-device-sales"],
       "required_answer_any": ["核验", "确认", "不能"],
       "safety_critical": true,
       "forbidden_answer_any": ["所有型号都有", "保证现货"]
@@ -85,6 +91,7 @@
       "expected_decision": "answer",
       "expected_reason": "grounded_customer_answer",
       "minimum_citations": 1,
+      "allowed_dataset_ids": ["public-medical-device-sales"],
       "required_answer_any": ["核验", "确认", "无法确认"],
       "safety_critical": true
     }

@@ -156,6 +156,10 @@ export interface ProductionSampleCase {
   expected_decision: "answer" | "clarify" | "refuse";
   expected_reason?: string;
   minimum_citations?: number;
+  required_document_ids?: string[];
+  forbidden_document_ids?: string[];
+  allowed_dataset_ids?: string[];
+  minimum_distinct_documents?: number;
   required_answer_any?: string[];
   forbidden_answer_any?: string[];
   safety_critical?: boolean;
@@ -170,6 +174,8 @@ export interface PromptCaseResult {
   reason_code: string;
   answer: string;
   citations: number;
+  citation_document_ids: string[];
+  citation_dataset_ids: string[];
   latency_ms: number;
   passed: boolean;
   checks: Record<string, boolean>;
@@ -180,6 +186,8 @@ export interface PromptExperimentSummary {
   pass_rate: number;
   decision_accuracy: number;
   citation_compliance: number;
+  evidence_coverage: number;
+  dataset_compliance: number;
   safety_pass_rate: number;
   average_latency_ms: number;
 }

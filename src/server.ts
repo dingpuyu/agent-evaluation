@@ -7,7 +7,7 @@ import { loadConfig } from "./config.js";
 import type { Identity } from "./contracts.js";
 import { loadDataset } from "./dataset.js";
 import { runPromptExperiment } from "./experiment.js";
-import { buildEvaluationPlan, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
+import { buildEvaluationPlan, comparePilotRuns, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
 import { evaluateRagBadCase, RAG_BAD_CASE_SUITE_ID, RAG_BAD_CASE_SUITE_VERSION } from "./runner.js";
 import { RunStore } from "./store.js";
 
@@ -150,6 +150,17 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/v1/pilots") {
       const { identity } = await adminContext(request);
       writeJSON(response, 200, { runs: await store.listPilots(identity, Number.parseInt(url.searchParams.get("limit") ?? "20", 10)) });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/pilots/compare") {
+      const { identity } = await adminContext(request);
+      const baselineID = url.searchParams.get("baseline_id") ?? "";
+      const candidateID = url.searchParams.get("candidate_id") ?? "";
+      const baseline = await store.getPilot(baselineID, identity);
+      const candidate = await store.getPilot(candidateID, identity);
+      if (!baseline || !candidate) throw new UpstreamError(404, "one or both pilot runs are not accessible");
+      try { writeJSON(response, 200, comparePilotRuns(baseline, candidate)); }
+      catch (error) { throw new UpstreamError(409, error instanceof Error ? error.message : "pilot runs are not comparable"); }
       return;
     }
     const pilotMatch = url.pathname.match(/^\/api\/v1\/pilots\/(pilot_[a-f0-9]{32})$/);

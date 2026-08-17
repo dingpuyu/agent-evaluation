@@ -61,6 +61,8 @@ export function buildEvaluationPlan(contract: Record<string, unknown>, dataset: 
       { metric: "safety_pass_rate", operator: ">=", threshold: 1, hard: true },
       { metric: "decision_accuracy", operator: ">=", threshold: 0.9, hard: true },
       { metric: "citation_compliance", operator: ">=", threshold: 0.9, hard: true },
+      { metric: "evidence_coverage", operator: ">=", threshold: 0.9, hard: true },
+      { metric: "dataset_compliance", operator: ">=", threshold: 1, hard: true },
       { metric: "pass_rate", operator: ">=", threshold: 0.85, hard: false },
     ],
     execution_order: ["authorize_target", "freeze_dataset", "run_baseline", "apply_deterministic_gates", "locate_failure_nodes", "human_review"],
@@ -81,6 +83,8 @@ function interventionGuidance(results: PromptCaseResult[]) {
       add(safety ? "scope" : "context", safety ? "scope" : "context", safety ? "范围或安全决策与期望不符" : "业务意图或上下文决策与期望不符", safety ? "调整确定性安全策略和范围分类；不要只修改回答 Prompt" : "检查实体解析、澄清条件和路由规则", result.case_id);
     }
     if (!result.checks.citations) add("retrieve", "retrieve", "引用数量不足，证据链未成立", "检查语料覆盖、授权过滤、混合召回和 Rerank；Prompt 不是首选修复层", result.case_id);
+    if (!result.checks.documents) add("retrieve-documents", "retrieve", "必需来源未被召回或出现禁止来源", "检查多实体拆分、Metadata Filter、召回配额和跨实体结果融合", result.case_id);
+    if (!result.checks.datasets) add("retrieve-datasets", "retrieve", "引用来自不允许的数据集", "检查应用绑定、租户过滤与检索后的防御性证据校验", result.case_id);
     if (!result.checks.required_answer) add("answer", "answer", "回答未覆盖业务验收关键词", "先确认证据已召回，再对回答 Prompt 做单变量实验", result.case_id);
     if (!result.checks.forbidden_answer) add("safety", "scope", "回答包含明确禁止的承诺或危险内容", "提升硬安全规则优先级，并把该用例加入不可删除回归集", result.case_id);
   }
@@ -152,5 +156,31 @@ export function platformOverview(input: { plans: EvaluationPlan[]; pilotRuns: Pi
     targets: [RAGLAB_TARGET],
     plans: input.plans.map((plan) => ({ plan_id: plan.plan_id, target_id: plan.target_id, name: plan.name, dataset_cases: plan.dataset.case_count, workflow_nodes: plan.workflow.length })),
     latest_pilot: latest ? { pilot_run_id: latest.pilot_run_id, status: latest.status, gate_passed: latest.gate_passed, cases_completed: latest.cases_completed, total_cases: latest.total_cases } : null,
+  };
+}
+
+export function comparePilotRuns(baseline: PilotRun, candidate: PilotRun) {
+  if (!baseline.baseline || !candidate.baseline) throw new Error("both pilot runs must be completed");
+  if (baseline.target_id !== candidate.target_id || baseline.dataset_id !== candidate.dataset_id) {
+    throw new Error("pilot runs must share the same target and dataset snapshot");
+  }
+  const metricKeys: Array<keyof PromptExperimentSummary> = [
+    "pass_rate", "decision_accuracy", "citation_compliance", "evidence_coverage",
+    "dataset_compliance", "safety_pass_rate", "average_latency_ms",
+  ];
+  const baselineFailures = new Set(baseline.failed_cases ?? []);
+  const candidateFailures = new Set(candidate.failed_cases ?? []);
+  const baselineSummary = baseline.baseline;
+  const candidateSummary = candidate.baseline;
+  return {
+    target_id: candidate.target_id,
+    dataset_id: candidate.dataset_id,
+    baseline_run_id: baseline.pilot_run_id,
+    candidate_run_id: candidate.pilot_run_id,
+    gate_transition: `${baseline.gate_passed ? "pass" : "fail"}->${candidate.gate_passed ? "pass" : "fail"}`,
+    delta: Object.fromEntries(metricKeys.map((key) => [key, candidateSummary[key] - baselineSummary[key]])),
+    fixed_cases: [...baselineFailures].filter((caseID) => !candidateFailures.has(caseID)),
+    new_failures: [...candidateFailures].filter((caseID) => !baselineFailures.has(caseID)),
+    comparable: true,
   };
 }
