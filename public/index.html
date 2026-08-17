@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Agent Evaluation — 业务链路、生产样本、Prompt A/B 与 Bad Case 诊断工作台">
+  <title>Agent Evaluation</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/comparison.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#top"><span>AE</span><div><b>Agent Evaluation</b><small>Evidence before opinion</small></div></a>
+      <nav>
+        <a href="#flow" class="active">业务链路</a>
+        <a href="#experiment">Prompt 实验</a>
+        <a href="#dataset">生产样本</a>
+        <a href="#badcases">Bad Case</a>
+        <a href="#history">运行历史</a>
+      </nav>
+      <div class="target-status"><span id="healthDot"></span><div><b>RAG Evolution Lab</b><small id="healthText">连接中…</small></div></div>
+      <div class="identity" id="identityBox"><small>尚未登录</small></div>
+    </aside>
+
+    <main id="top">
+      <header class="hero">
+        <div><p class="eyebrow">AGENT QUALITY ENGINEERING</p><h1>找到真正值得优化的<br><em>业务节点</em></h1><p>从业务链路、生产回放、工具轨迹到提示词实验，用可复现的对照结果指导 Agent 演进。</p></div>
+        <div class="hero-proof"><span>当前策略</span><b>Baseline vs Candidate</b><small>隔离运行 · 不修改生产 · 全链路 Trace</small></div>
+      </header>
+
+      <section class="summary-grid" id="summaryGrid">
+        <article><small>评测目标</small><b>—</b><span>等待加载</span></article>
+        <article><small>评测套件</small><b>—</b><span>等待加载</span></article>
+        <article><small>生产型样本</small><b>—</b><span>等待加载</span></article>
+        <article><small>Judge / Harness</small><b>—</b><span>等待加载</span></article>
+      </section>
+
+      <section id="flow" class="panel flow-panel">
+        <div class="section-heading"><div><p class="eyebrow">01 / BUSINESS CHAIN</p><h2>业务链路与干预地图</h2><p id="businessGoal">登录后读取目标 Agent 的评测契约。</p></div><span class="tag">先定位，再优化</span></div>
+        <div class="flow" id="flowMap"><div class="empty">等待目标系统契约</div></div>
+        <div class="hard-controls" id="hardControls"></div>
+      </section>
+
+      <section id="experiment" class="panel experiment-panel">
+        <div class="section-heading"><div><p class="eyebrow">02 / CONTROLLED EXPERIMENT</p><h2>Prompt Baseline / Candidate</h2><p>候选提示词只注入回答生成节点。权限、拒答、证据校验等硬规则不可覆盖。</p></div><span class="tag mint">零生产写入</span></div>
+        <div class="prompt-grid">
+          <div class="prompt-card readonly"><header><b>Baseline</b><span>当前生产提示词</span></header><pre id="baselinePrompt">登录后加载…</pre></div>
+          <div class="prompt-card candidate"><header><b>Candidate Overlay</b><span>仅本次评测生效</span></header><textarea id="candidatePrompt" rows="12">回答先给一句话结论，再按“适用范围、关键事实、需要进一步核验的内容”组织。面向小白解释首次出现的专业术语；每条产品差异必须能对应引用证据，不能从型号名称推断配置。</textarea><footer><label>回放样本<select id="caseLimit"><option value="3">3 条 / 快速验证</option><option value="4" selected>4 条 / 推荐</option><option value="8">8 条 / 完整样本</option></select></label><button id="runExperiment">运行对照评测</button></footer></div>
+        </div>
+        <div id="experimentResult" class="result-slot"><div class="empty">编辑候选提示词并运行，结果会显示改善、退化和未变化案例。</div></div>
+      </section>
+
+      <section id="dataset" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">03 / PRODUCTION REPLAY SET</p><h2>脱敏生产型数据集</h2><p id="datasetDescription">当前样本不包含患者信息，来源与真实性边界会明确展示。</p></div><span class="tag" id="datasetMeta">—</span></div>
+        <div class="dataset-table" id="datasetTable"><div class="empty">登录后加载数据集</div></div>
+      </section>
+
+      <section id="badcases" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">04 / EVIDENCE DIAGNOSIS</p><h2>RAG Bad Case 诊断</h2><p>Pi Harness 读取人工期望、历史复测和本次 Trace，只给出需人工审核的优化假设。</p></div><span class="tag">Read-only Replay</span></div>
+        <div class="badcase-list" id="badcaseList"><div class="empty">登录后加载当前租户可见的 Bad Case</div></div>
+        <div id="diagnosisResult"></div>
+      </section>
+
+      <section id="history" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">05 / AUDIT HISTORY</p><h2>评测运行历史</h2><p>每次运行保留目标、套件版本、模型、指标、工具序列与人工审核要求。</p></div></div>
+        <div class="history-list" id="historyList"><div class="empty">尚无运行记录</div></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="login-layer" id="loginLayer">
+    <form class="login-card" id="loginForm">
+      <span class="login-mark">AE</span>
+      <p class="eyebrow">AUTHORIZED EVALUATION</p>
+      <h2>连接被测 Agent</h2>
+      <p>使用 RAG Evolution Lab 管理员身份。令牌只保存在当前浏览器，不写入评测记录。</p>
+      <label>邮箱<input id="email" type="email" value="alice@tenant-a.local" autocomplete="username" required></label>
+      <label>密码<input id="password" type="password" value="RagLab-Alice-2026!" autocomplete="current-password" required></label>
+      <button type="submit">登录并加载评测上下文</button>
+      <small id="loginError"></small>
+    </form>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+data/runs/*.json
+data/runs/*.tmp
+*.log

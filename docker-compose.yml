@@ -1,0 +1,27 @@
+name: agent-evaluation
+services:
+  evaluator:
+    build: .
+    restart: unless-stopped
+    environment:
+      RAGLAB_API_URL: ${RAGLAB_API_URL:-http://host.docker.internal:18080}
+      RAGLAB_AGENT_URL: ${RAGLAB_AGENT_URL:-http://host.docker.internal:8090}
+      EVALUATION_MODEL_API_KEY: ${EVALUATION_MODEL_API_KEY:-${DEEPSEEK_API_KEY:-}}
+      EVALUATION_MODEL_BASE_URL: ${EVALUATION_MODEL_BASE_URL:-https://api.deepseek.com}
+      EVALUATION_MODEL: ${EVALUATION_MODEL:-deepseek-chat}
+      EVALUATION_MAX_TURNS: ${EVALUATION_MAX_TURNS:-6}
+      EVALUATION_MAX_TOOL_CALLS: ${EVALUATION_MAX_TOOL_CALLS:-8}
+      EVALUATION_TIMEOUT_MS: ${EVALUATION_TIMEOUT_MS:-90000}
+      EVALUATION_DATA_DIR: /var/lib/agent-evaluation
+      EVALUATION_DATASET_PATH: /app/datasets/raglab-medical-sales-production-sample-v1.json
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "${AGENT_EVALUATION_PORT:-18200}:8200"
+    volumes:
+      - agent_evaluation_data:/var/lib/agent-evaluation
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  agent_evaluation_data:
