@@ -46,6 +46,14 @@ RAG Agent 对多个显式型号进行并行 fan-out 检索，再按实体交错�
 
 平台的运行对比页和 `/api/v1/pilots/compare` 会直接展示这次 Fail → Pass、+12.5 个百分点证据覆盖提升与已修复用例。
 
+## 最终联合验收
+
+提交前再次运行两个平台的真实链路：
+
+- `rag-evolution-lab` Medical Smoke：21 项检查通过，覆盖 Tenant A/B、客户公开资料边界和 Bad Case 隔离；
+- Evaluation Smoke：Pi 诊断和 2 条 Prompt Baseline/Candidate 回放通过，无新增退化；
+- 完整 Pilot：`pilot_78247cb6fc034a50bba0bb398d33a491`，8/8 通过，所有硬门禁通过，平均延迟 2135.5 ms，`production_mutation=false`。
+
 ## 能对外讲清的经验
 
 1. 评测平台不是给答案打一个总分，而是把业务问题映射到可干预节点。
