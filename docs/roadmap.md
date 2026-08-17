@@ -8,6 +8,8 @@
 - Prompt Baseline/Candidate 隔离对比。
 - Pi Bad Case 证据诊断。
 - 运行持久化、租户隔离和本地工作台。
+- Target / Workflow / Evaluation Plan 注册模型。
+- 异步完整 Baseline Pilot、质量门禁与失败节点映射。
 
 ## Phase 2：真实生产样本治理
 

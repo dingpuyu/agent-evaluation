@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 import type { Identity } from "./contracts.js";
 import { loadDataset } from "./dataset.js";
 import { runPromptExperiment } from "./experiment.js";
+import { buildEvaluationPlan, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
 import { evaluateRagBadCase, RAG_BAD_CASE_SUITE_ID, RAG_BAD_CASE_SUITE_VERSION } from "./runner.js";
 import { RunStore } from "./store.js";
 
@@ -14,6 +15,7 @@ const config = loadConfig();
 const baseAdapter = new RaglabAdapter(config.raglabAgentUrl, config.raglabApiUrl);
 const store = new RunStore(config.dataDir);
 const activeSubjects = new Set<string>();
+const activePilots = new Set<string>();
 const publicDir = join(process.cwd(), "public");
 
 function writeJSON(response: ServerResponse, status: number, value: unknown) {
@@ -66,7 +68,7 @@ async function adminContext(request: IncomingMessage): Promise<{ identity: Ident
 
 async function serveStatic(pathname: string, response: ServerResponse): Promise<boolean> {
   const requested = pathname === "/" ? "index.html" : pathname.slice(1);
-  if (!/^(index\.html|app\.js|styles\.css|comparison\.css)$/.test(requested)) return false;
+  if (!/^(index\.html|app\.js|styles\.css|comparison\.css|platform\.css)$/.test(requested)) return false;
   try {
     const body = await readFile(join(publicDir, requested));
     const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" }[extname(requested)] ?? "application/octet-stream";
@@ -89,6 +91,7 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/healthz") {
       writeJSON(response, 200, {
         status: "ok",
+        version: "0.2.0",
         runtime: "pi-agent-core",
         model: config.model,
         model_configured: Boolean(config.modelApiKey),
@@ -100,7 +103,7 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/v1/catalog") {
       const dataset = await loadDataset(config.datasetPath);
       writeJSON(response, 200, {
-        targets: [{ id: "rag-evolution-lab", name: "RAG Evolution Lab", type: "agent_application", capabilities: ["rag", "langgraph", "tool_calling", "query_trace", "tenant_isolation", "prompt_sandbox"] }],
+        targets: [{ id: RAGLAB_TARGET.target_id, name: RAGLAB_TARGET.name, type: RAGLAB_TARGET.target_type, capabilities: RAGLAB_TARGET.capabilities }],
         suites: [
           { id: RAG_BAD_CASE_SUITE_ID, version: RAG_BAD_CASE_SUITE_VERSION, name: "RAG Bad Case Evidence Diagnosis", dimensions: ["task", "tool_use", "retrieval", "grounding", "safety", "observability", "performance"] },
           { id: "raglab.medical-sales.prompt-ab.v1", version: "1.0.0", name: "Medical Sales Agent Prompt A/B", dimensions: ["task", "grounding", "safety", "performance"] },
@@ -129,6 +132,52 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/v1/datasets/production-sample") {
       await adminContext(request);
       writeJSON(response, 200, await loadDataset(config.datasetPath));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/platform/overview") {
+      const { identity, adapter } = await adminContext(request);
+      const dataset = await loadDataset(config.datasetPath);
+      const plan = buildEvaluationPlan(await adapter.getEvaluationContract(), dataset);
+      writeJSON(response, 200, platformOverview({ plans: [plan], pilotRuns: await store.listPilots(identity) }));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/plans/raglab-medical-sales-baseline-v1") {
+      const { adapter } = await adminContext(request);
+      const dataset = await loadDataset(config.datasetPath);
+      writeJSON(response, 200, buildEvaluationPlan(await adapter.getEvaluationContract(), dataset));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/pilots") {
+      const { identity } = await adminContext(request);
+      writeJSON(response, 200, { runs: await store.listPilots(identity, Number.parseInt(url.searchParams.get("limit") ?? "20", 10)) });
+      return;
+    }
+    const pilotMatch = url.pathname.match(/^\/api\/v1\/pilots\/(pilot_[a-f0-9]{32})$/);
+    if (request.method === "GET" && pilotMatch?.[1]) {
+      const { identity } = await adminContext(request);
+      const run = await store.getPilot(pilotMatch[1], identity);
+      if (!run) throw new UpstreamError(404, "pilot run was not found or is not accessible");
+      writeJSON(response, 200, run);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/v1/pilots/raglab-medical-sales-baseline-v1/runs") {
+      const { identity, adapter } = await adminContext(request);
+      const activeKey = `${identity.tenant_id}:raglab-medical-sales-baseline-v1`;
+      if (activePilots.has(activeKey)) throw new UpstreamError(409, "this tenant pilot is already running");
+      const dataset = await loadDataset(config.datasetPath);
+      const plan = buildEvaluationPlan(await adapter.getEvaluationContract(), dataset);
+      const run = createPilotRun(plan, identity);
+      await store.savePilot(run);
+      activePilots.add(activeKey);
+      void executePilotRun({ run, plan, dataset, adapter, onProgress: (progress) => store.savePilot(progress) })
+        .catch(async (error) => {
+          run.status = "failed";
+          run.error = error instanceof Error ? error.message.slice(0, 1200) : "pilot evaluation failed";
+          run.completed_at = new Date().toISOString();
+          await store.savePilot(run);
+        })
+        .finally(() => activePilots.delete(activeKey));
+      writeJSON(response, 202, run);
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/v1/evaluations/runs") {

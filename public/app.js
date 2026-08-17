@@ -1,5 +1,5 @@
 const SESSION_KEY = "agent-evaluation-session";
-const state = { session: null, catalog: null, contract: null, dataset: null, badCases: [], runs: [], experiments: [] };
+const state = { session: null, catalog: null, contract: null, dataset: null, platform: null, plan: null, pilots: [], badCases: [], runs: [], experiments: [] };
 const $ = (selector) => document.querySelector(selector);
 const h = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`;
@@ -38,6 +38,44 @@ function renderSummary() {
     <article><small>评测套件</small><b>${suites.length}</b><span>RAG 诊断 + Prompt A/B</span></article>
     <article><small>生产型样本</small><b>${dataset?.cases?.length ?? "—"}</b><span>${h(dataset?.provenance || "等待加载")}</span></article>
     <article><small>Judge / Harness</small><b>Pi + Rules</b><span>模型辅助 + 确定性门禁</span></article>`;
+}
+
+function renderPlan() {
+  const plan = state.plan;
+  if (!plan) return;
+  $("#planName").textContent = plan.name;
+  $("#planObjective").textContent = plan.objective;
+  $("#planTarget").textContent = plan.target_id;
+  $("#planEnvironment").textContent = `${plan.app_id} · ${plan.environment_id}`;
+  $("#planDataset").textContent = `${plan.dataset.dataset_id} @ ${plan.dataset.version}`;
+  $("#planProvenance").textContent = `${plan.dataset.case_count} cases · ${plan.dataset.safety_case_count} safety · ${plan.dataset.provenance}`;
+  $("#planExecution").textContent = `${plan.workflow.length} nodes · ${plan.execution_order.length} stages`;
+  $("#planGates").innerHTML = plan.gates.map((gate) => `<span>${h(gate.metric)} ≥ ${gate.threshold} ${gate.hard ? "· HARD" : "· QUALITY"}</span>`).join("");
+}
+
+function renderPilot(run) {
+  const button = $("#runPilot");
+  if (!run) {
+    button.disabled = false;
+    $("#pilotResult").innerHTML = `<div class="empty">尚未运行首轮完整基线。点击后会异步执行全部 ${state.plan?.dataset?.case_count || 0} 条样本。</div>`;
+    return;
+  }
+  const active = run.status === "queued" || run.status === "running";
+  button.disabled = active;
+  button.textContent = active ? `运行中 ${run.cases_completed}/${run.total_cases}` : "重新运行完整基线";
+  if (active) {
+    const progress = run.total_cases ? Math.round(run.cases_completed / run.total_cases * 100) : 0;
+    $("#pilotResult").innerHTML = `<div class="pilot-progress"><header><code>${h(run.pilot_run_id)}</code><b>${h(run.status)} · ${run.cases_completed}/${run.total_cases}</b></header><div class="pilot-progress-track"><i style="width:${progress}%"></i></div></div>`;
+    return;
+  }
+  if (run.status === "failed") {
+    $("#pilotResult").innerHTML = `<div class="recommendation">试点运行失败：${h(run.error || "未知错误")}</div>`;
+    return;
+  }
+  const summary = run.baseline || {};
+  const gateRows = (run.gates || []).map((gate) => `<div class="${gate.passed ? "pass" : "fail"}"><b>${h(gate.metric)}</b><span>${gate.metric === "average_latency_ms" ? Math.round(gate.actual) : pct(gate.actual)}</span><span>目标 ${gate.threshold}</span></div>`).join("");
+  const guidance = (run.intervention_guidance || []).map((item) => `<article><header><code>${h(item.node_id)}</code><b>${h(item.finding)}</b></header><p>${h(item.recommended_intervention)}</p><small>影响用例：${h(item.affected_cases.join("、"))}</small></article>`).join("");
+  $("#pilotResult").innerHTML = `<div class="recommendation">${run.gate_passed ? "首轮质量门禁通过，可进入候选策略实验。" : `首轮门禁未通过：${run.failed_cases?.length || 0} 条失败。先按节点修复，再做 Prompt A/B。`}</div><div class="pilot-metrics"><div><small>OVERALL PASS</small><b>${pct(summary.pass_rate)}</b></div><div><small>DECISION</small><b>${pct(summary.decision_accuracy)}</b></div><div><small>CITATION</small><b>${pct(summary.citation_compliance)}</b></div><div><small>SAFETY</small><b>${pct(summary.safety_pass_rate)}</b></div><div><small>AVG LATENCY</small><b>${Math.round(summary.average_latency_ms || 0)}ms</b></div></div><div class="pilot-gate-results">${gateRows}</div><div class="pilot-guidance">${guidance || `<div class="empty">当前样本未发现需要定位的失败节点。</div>`}</div>`;
 }
 
 function renderContract() {
@@ -89,6 +127,7 @@ function renderExperiment(experiment) {
 
 function renderHistory() {
   const items = [
+    ...state.pilots.map((item) => ({ id: item.pilot_run_id, kind: "Platform Pilot", status: item.status, time: item.started_at, result: item.status === "completed" ? `${item.gate_passed ? "GATE PASS" : "GATE FAIL"} · ${item.cases_completed}/${item.total_cases}` : `${item.cases_completed}/${item.total_cases}` })),
     ...state.runs.map((item) => ({ id: item.run_id, kind: "RAG Bad Case", status: item.status, time: item.started_at, result: item.report?.root_cause || "—" })),
     ...state.experiments.map((item) => ({ id: item.experiment_id, kind: "Prompt A/B", status: item.status, time: item.started_at, result: `${pct(item.baseline.pass_rate)} → ${pct(item.candidate.pass_rate)}` })),
   ].sort((a, b) => String(b.time).localeCompare(String(a.time)));
@@ -101,13 +140,17 @@ async function loadWorkspace() {
     api("/api/v1/targets/raglab/contract"),
     api("/api/v1/datasets/production-sample"),
   ]);
-  const [badCases, runs, experiments] = await Promise.all([
+  const [badCases, runs, experiments, platform, plan, pilots] = await Promise.all([
     api("/api/v1/targets/raglab/bad-cases"),
     api("/api/v1/evaluations/runs"),
     api("/api/v1/experiments/prompt-comparisons"),
+    api("/api/v1/platform/overview"),
+    api("/api/v1/plans/raglab-medical-sales-baseline-v1"),
+    api("/api/v1/pilots"),
   ]);
   state.badCases = badCases.cases || []; state.runs = runs.runs || []; state.experiments = experiments.experiments || [];
-  renderSummary(); renderContract(); renderDataset(); renderBadCases(); renderHistory();
+  state.platform = platform; state.plan = plan; state.pilots = pilots.runs || [];
+  renderSummary(); renderPlan(); renderPilot(state.pilots[0]); renderContract(); renderDataset(); renderBadCases(); renderHistory();
 }
 
 async function login(event) {
@@ -133,6 +176,27 @@ async function runExperiment() {
   finally { button.disabled = false; button.textContent = previous; }
 }
 
+async function pollPilot(pilotRunID) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    const run = await api(`/api/v1/pilots/${encodeURIComponent(pilotRunID)}`);
+    state.pilots = [run, ...state.pilots.filter((item) => item.pilot_run_id !== run.pilot_run_id)];
+    renderPilot(run); renderHistory();
+    if (run.status === "completed" || run.status === "failed") return run;
+  }
+  throw new Error("试点仍在服务端运行，请稍后刷新运行历史");
+}
+
+async function runPilot() {
+  const button = $("#runPilot"); button.disabled = true; button.textContent = "创建运行…";
+  try {
+    const run = await api("/api/v1/pilots/raglab-medical-sales-baseline-v1/runs", { method: "POST", body: "{}" });
+    state.pilots.unshift(run); renderPilot(run); renderHistory();
+    const completed = await pollPilot(run.pilot_run_id);
+    toast(completed.status === "completed" ? "首轮平台试点评测完成。" : `试点失败：${completed.error || "未知错误"}`);
+  } catch (error) { toast(error.message); button.disabled = false; button.textContent = "运行完整基线"; }
+}
+
 async function diagnose(badCaseID, button) {
   const previous = button.textContent; button.disabled = true; button.textContent = "读取 Trace…";
   try {
@@ -144,6 +208,7 @@ async function diagnose(badCaseID, button) {
 
 $("#loginForm").addEventListener("submit", login);
 $("#runExperiment").addEventListener("click", runExperiment);
+$("#runPilot").addEventListener("click", runPilot);
 $("#badcaseList").addEventListener("click", (event) => { const button = event.target.closest("[data-diagnose]"); if (button) diagnose(button.dataset.diagnose, button); });
 document.querySelectorAll(".sidebar nav a").forEach((link) => link.addEventListener("click", () => { document.querySelectorAll(".sidebar nav a").forEach((item) => item.classList.remove("active")); link.classList.add("active"); }));
 

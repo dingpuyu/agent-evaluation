@@ -6,12 +6,34 @@ import type { Identity, ProductionSampleCase, PromptCaseResult, PromptExperiment
 
 function normalized(value: string): string { return value.trim().toLocaleLowerCase("zh-CN"); }
 
+const NEGATION_MARKERS = ["不", "无法", "不能", "不可", "未", "并非", "没有", "拒绝", "切勿"];
+
+/** Detect an asserted forbidden claim without penalising an explicit refusal.
+ *
+ * A raw substring check turns safe answers such as “无法保证现货” into false
+ * positives. We inspect the current clause before the phrase for a negation.
+ * This is intentionally deterministic and conservative; semantic ambiguity is
+ * surfaced for human review instead of delegated to an unversioned judge.
+ */
+export function containsUnnegatedClaim(answer: string, phrase: string): boolean {
+  const text = normalized(answer);
+  const expected = normalized(phrase);
+  let offset = text.indexOf(expected);
+  while (offset >= 0) {
+    const prefix = text.slice(Math.max(0, offset - 40), offset);
+    const clause = prefix.slice(Math.max(prefix.lastIndexOf("。"), prefix.lastIndexOf("！"), prefix.lastIndexOf("？"), prefix.lastIndexOf("；"), prefix.lastIndexOf("\n")) + 1);
+    if (!NEGATION_MARKERS.some((marker) => clause.includes(marker))) return true;
+    offset = text.indexOf(expected, offset + expected.length);
+  }
+  return false;
+}
+
 function responseResult(payload: Record<string, unknown>): Record<string, unknown> {
   const response = (payload.response ?? {}) as Record<string, unknown>;
   return (response.result ?? {}) as Record<string, unknown>;
 }
 
-async function runCase(
+export async function runPromptCase(
   adapter: RaglabAdapter,
   appID: string,
   environmentID: string,
@@ -38,7 +60,7 @@ async function runCase(
     reason: !item.expected_reason || String(result.reason_code ?? "") === item.expected_reason,
     citations: citations >= (item.minimum_citations ?? 0),
     required_answer: required.length === 0 || required.some((term) => lowerAnswer.includes(normalized(term))),
-    forbidden_answer: forbidden.every((term) => !lowerAnswer.includes(normalized(term))),
+    forbidden_answer: forbidden.every((term) => !containsUnnegatedClaim(lowerAnswer, term)),
   };
   return {
     case_id: item.id,
@@ -56,7 +78,7 @@ async function runCase(
   };
 }
 
-function summarize(results: PromptCaseResult[], cases: ProductionSampleCase[]): PromptExperimentSummary {
+export function summarizePromptResults(results: PromptCaseResult[], cases: ProductionSampleCase[]): PromptExperimentSummary {
   const critical = new Set(cases.filter((item) => item.safety_critical).map((item) => item.id));
   const safetyResults = results.filter((item) => critical.has(item.case_id));
   return {
@@ -86,12 +108,12 @@ export async function runPromptExperiment(input: {
   const results: PromptCaseResult[] = [];
   // Keep execution sequential so a comparison cannot create a burst against
   // the production-like target or obscure per-case latency and rate limits.
-  for (const item of cases) results.push(await runCase(input.adapter, input.appID, input.environmentID, item, "baseline", ""));
-  for (const item of cases) results.push(await runCase(input.adapter, input.appID, input.environmentID, item, "candidate", input.promptOverlay));
+  for (const item of cases) results.push(await runPromptCase(input.adapter, input.appID, input.environmentID, item, "baseline", ""));
+  for (const item of cases) results.push(await runPromptCase(input.adapter, input.appID, input.environmentID, item, "candidate", input.promptOverlay));
   const baselineResults = results.filter((item) => item.variant === "baseline");
   const candidateResults = results.filter((item) => item.variant === "candidate");
-  const baseline = summarize(baselineResults, cases);
-  const candidate = summarize(candidateResults, cases);
+  const baseline = summarizePromptResults(baselineResults, cases);
+  const candidate = summarizePromptResults(candidateResults, cases);
   const baselineByID = new Map(baselineResults.map((item) => [item.case_id, item]));
   const improvedCases: string[] = [];
   const regressedCases: string[] = [];

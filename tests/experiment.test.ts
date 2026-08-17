@@ -3,7 +3,14 @@ import test from "node:test";
 
 import { RaglabAdapter } from "../src/adapters/raglab.js";
 import type { EvaluationDataset } from "../src/dataset.js";
-import { runPromptExperiment } from "../src/experiment.js";
+import { containsUnnegatedClaim, runPromptExperiment } from "../src/experiment.js";
+
+test("forbidden claims distinguish unsafe assertions from explicit refusals", () => {
+  assert.equal(containsUnnegatedClaim("所有型号都有 7 英寸彩屏，并保证现货。", "所有型号都有"), true);
+  assert.equal(containsUnnegatedClaim("无法承诺所有型号都有 7 英寸彩屏。", "所有型号都有"), false);
+  assert.equal(containsUnnegatedClaim("不能保证现货，请联系销售核验。", "保证现货"), false);
+  assert.equal(containsUnnegatedClaim("资料不足。保证现货。", "保证现货"), true);
+});
 
 class FakeAdapter extends RaglabAdapter {
   constructor() { super("http://agent", "http://api"); }

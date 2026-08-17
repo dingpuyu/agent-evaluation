@@ -206,3 +206,82 @@ export interface PromptExperiment {
   recommendation: string;
   production_mutation: false;
 }
+
+export interface TargetManifest {
+  target_id: string;
+  name: string;
+  target_type: "agent_application";
+  adapter: string;
+  status: "connected" | "unavailable";
+  capabilities: string[];
+  first_pilot: string;
+}
+
+export interface EvaluationPlan {
+  schema: "agent-evaluation.plan.v1";
+  plan_id: string;
+  target_id: string;
+  suite_id: string;
+  name: string;
+  objective: string;
+  app_id: string;
+  environment_id: string;
+  workflow: Array<{
+    node_id: string;
+    name: string;
+    owner: string;
+    evaluation_questions: string[];
+    metrics: string[];
+    interventions: string[];
+    prompt_editable: boolean;
+  }>;
+  dataset: {
+    dataset_id: string;
+    version: string;
+    provenance: string;
+    case_count: number;
+    safety_case_count: number;
+    segments: string[];
+  };
+  gates: Array<{ metric: keyof PromptExperimentSummary; operator: ">="; threshold: number; hard: boolean }>;
+  execution_order: string[];
+  production_mutation: false;
+}
+
+export interface PilotGateResult {
+  metric: keyof PromptExperimentSummary;
+  actual: number;
+  threshold: number;
+  hard: boolean;
+  passed: boolean;
+}
+
+export interface PilotRun {
+  pilot_run_id: string;
+  plan_id: string;
+  target_id: string;
+  suite_id: string;
+  dataset_id: string;
+  tenant_id: string;
+  requested_by: string;
+  app_id: string;
+  environment_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  cases_completed: number;
+  total_cases: number;
+  started_at: string;
+  completed_at?: string;
+  baseline?: PromptExperimentSummary;
+  gates?: PilotGateResult[];
+  gate_passed?: boolean;
+  failed_cases?: string[];
+  intervention_guidance?: Array<{
+    node_id: string;
+    finding: string;
+    recommended_intervention: string;
+    affected_cases: string[];
+  }>;
+  results: PromptCaseResult[];
+  error?: string;
+  production_mutation: false;
+}

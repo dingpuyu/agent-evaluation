@@ -7,13 +7,15 @@
   <title>Agent Evaluation</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/comparison.css">
+  <link rel="stylesheet" href="/platform.css">
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar">
       <a class="brand" href="#top"><span>AE</span><div><b>Agent Evaluation</b><small>Evidence before opinion</small></div></a>
       <nav>
-        <a href="#flow" class="active">业务链路</a>
+        <a href="#pilot" class="active">平台试点</a>
+        <a href="#flow">业务链路</a>
         <a href="#experiment">Prompt 实验</a>
         <a href="#dataset">生产样本</a>
         <a href="#badcases">Bad Case</a>
@@ -34,6 +36,17 @@
         <article><small>评测套件</small><b>—</b><span>等待加载</span></article>
         <article><small>生产型样本</small><b>—</b><span>等待加载</span></article>
         <article><small>Judge / Harness</small><b>—</b><span>等待加载</span></article>
+      </section>
+
+      <section id="pilot" class="panel pilot-panel">
+        <div class="section-heading"><div><p class="eyebrow">00 / FIRST PLATFORM PILOT</p><h2 id="planName">首个评测计划</h2><p id="planObjective">登录后冻结目标、业务链路、数据集版本和质量门禁。</p></div><button class="pilot-run-button" id="runPilot">运行完整基线</button></div>
+        <div class="pilot-contract">
+          <div><small>TARGET</small><b id="planTarget">—</b><span id="planEnvironment">—</span></div>
+          <div><small>DATASET SNAPSHOT</small><b id="planDataset">—</b><span id="planProvenance">—</span></div>
+          <div><small>EXECUTION</small><b id="planExecution">—</b><span>只读回放 · 无生产写入</span></div>
+        </div>
+        <div class="pilot-gates" id="planGates"></div>
+        <div class="pilot-result" id="pilotResult"><div class="empty">运行首轮完整基线后，这里会显示门禁、失败用例和建议干预节点。</div></div>
       </section>
 
       <section id="flow" class="panel flow-panel">

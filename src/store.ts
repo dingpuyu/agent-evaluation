@@ -1,15 +1,17 @@
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { EvaluationRun, Identity, PromptExperiment } from "./contracts.js";
+import type { EvaluationRun, Identity, PilotRun, PromptExperiment } from "./contracts.js";
 
 export class RunStore {
   private readonly runsDir: string;
   private readonly experimentsDir: string;
+  private readonly pilotsDir: string;
 
   constructor(dataDir: string) {
     this.runsDir = join(dataDir, "runs");
     this.experimentsDir = join(dataDir, "experiments");
+    this.pilotsDir = join(dataDir, "pilots");
   }
 
   private path(runID: string): string {
@@ -66,6 +68,38 @@ export class RunStore {
     const entries = (await readdir(this.experimentsDir)).filter((name) => /^experiment_[a-f0-9]{32}\.json$/.test(name));
     const experiments = await Promise.all(entries.map(async (name) => JSON.parse(await readFile(join(this.experimentsDir, name), "utf8")) as PromptExperiment));
     return experiments.filter((item) => identity.roles.includes("platform_admin") || item.tenant_id === identity.tenant_id)
+      .sort((left, right) => right.started_at.localeCompare(left.started_at))
+      .slice(0, Math.max(1, Math.min(limit, 100)));
+  }
+
+  private pilotPath(pilotRunID: string): string {
+    if (!/^pilot_[a-f0-9]{32}$/.test(pilotRunID)) throw new Error("invalid pilot run id");
+    return join(this.pilotsDir, `${pilotRunID}.json`);
+  }
+
+  async savePilot(run: PilotRun): Promise<void> {
+    await mkdir(this.pilotsDir, { recursive: true });
+    const target = this.pilotPath(run.pilot_run_id);
+    const temporary = `${target}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(run, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temporary, target);
+  }
+
+  async getPilot(pilotRunID: string, identity: Identity): Promise<PilotRun | undefined> {
+    try {
+      const run = JSON.parse(await readFile(this.pilotPath(pilotRunID), "utf8")) as PilotRun;
+      return identity.roles.includes("platform_admin") || run.tenant_id === identity.tenant_id ? run : undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  async listPilots(identity: Identity, limit = 20): Promise<PilotRun[]> {
+    await mkdir(this.pilotsDir, { recursive: true });
+    const entries = (await readdir(this.pilotsDir)).filter((name) => /^pilot_[a-f0-9]{32}\.json$/.test(name));
+    const runs = await Promise.all(entries.map(async (name) => JSON.parse(await readFile(join(this.pilotsDir, name), "utf8")) as PilotRun));
+    return runs.filter((run) => identity.roles.includes("platform_admin") || run.tenant_id === identity.tenant_id)
       .sort((left, right) => right.started_at.localeCompare(left.started_at))
       .slice(0, Math.max(1, Math.min(limit, 100)));
   }

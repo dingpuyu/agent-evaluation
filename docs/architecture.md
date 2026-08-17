@@ -14,6 +14,19 @@ Agent Evaluation 的核心不是给最终答案打一个分，而是解释：业
   → 人工审核与发布建议
 ```
 
+平台对象之间的关系：
+
+```text
+Target Manifest
+  └─ Workflow Contract
+      └─ Evaluation Plan（目标 + 数据快照 + 指标 + 门禁）
+          ├─ Pilot Run（完整基线）
+          ├─ Prompt Experiment（单变量 A/B）
+          └─ Bad Case Diagnosis（证据化根因分析）
+```
+
+第一阶段只有一个 Target Adapter，但 Plan、Run、Dataset 和 Gate 已经脱离具体 UI。新增 Agent 时应实现 Adapter 和 Workflow Contract，而不是复制一套评测服务。
+
 ## 2. Target Adapter
 
 首个 `RaglabAdapter` 只依赖被测系统的 HTTP API：
@@ -51,3 +64,7 @@ Bearer Token 只存在于请求链路中，不进入运行记录。评测前先�
 ## 5. 数据真实性
 
 仓库自带的是“脱敏生产型”样本：覆盖真实流量形态，但不冒充真实客户日志。接入线上数据必须满足业务授权、最小字段、PII/PHI 脱敏、人工复核、数据版本和留存期限。`scripts/import_production_samples.py` 提供可审计的导入入口，并明确拒绝未授权导出。
+
+## 6. 首轮 Pilot 的判定边界
+
+首轮 Pilot 使用确定性断言检查决策、原因码、引用、必含事实和禁止内容，再把失败映射到业务节点。它不使用 Prompt Candidate，也不自动修改目标系统。只有 Baseline 形成后，才能选择回答 Prompt、检索、Rerank、语料或规则中的一个变量做后续实验。

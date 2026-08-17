@@ -1,0 +1,45 @@
+.pilot-run-button {
+  border: 0;
+  border-radius: 10px;
+  background: var(--green);
+  color: #fff;
+  padding: 11px 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pilot-run-button:disabled { opacity: .55; cursor: wait; }
+.pilot-contract { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.pilot-contract > div { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: #fff; display: grid; gap: 6px; }
+.pilot-contract small { font: 8px var(--mono); color: var(--muted); }
+.pilot-contract b { font-size: 12px; }
+.pilot-contract span { font-size: 9px; color: var(--muted); }
+.pilot-gates { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+.pilot-gates span { padding: 7px 9px; border-radius: 8px; background: #edf1ef; font: 8px var(--mono); color: #53625e; }
+.pilot-result { margin-top: 14px; }
+.pilot-progress { padding: 15px; background: var(--dark); color: #fff; border-radius: 13px; }
+.pilot-progress header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.pilot-progress header code { color: var(--lime); font-size: 9px; }
+.pilot-progress header b { font-size: 11px; }
+.pilot-progress-track { height: 7px; margin-top: 12px; overflow: hidden; border-radius: 99px; background: #ffffff16; }
+.pilot-progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--mint); transition: width .25s ease; }
+.pilot-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+.pilot-metrics div { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: grid; gap: 5px; }
+.pilot-metrics small { font: 8px var(--mono); color: var(--muted); }
+.pilot-metrics b { font-size: 17px; }
+.pilot-gate-results { display: grid; gap: 7px; margin-top: 10px; }
+.pilot-gate-results div { display: grid; grid-template-columns: 1fr 80px 80px; gap: 10px; padding: 9px 11px; border-radius: 8px; background: #f1f4f2; font-size: 9px; }
+.pilot-gate-results div.pass { border-left: 4px solid var(--mint); }
+.pilot-gate-results div.fail { border-left: 4px solid var(--orange); }
+.pilot-guidance { display: grid; gap: 8px; margin-top: 12px; }
+.pilot-guidance article { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #fff; }
+.pilot-guidance article header { display: flex; gap: 10px; align-items: center; }
+.pilot-guidance code { color: var(--green); font-size: 9px; }
+.pilot-guidance b { font-size: 10px; }
+.pilot-guidance p { margin: 8px 0 4px; font-size: 10px; line-height: 1.6; }
+.pilot-guidance small { color: var(--muted); font-size: 8px; }
+
+@media (max-width: 900px) {
+  .pilot-contract { grid-template-columns: 1fr; }
+  .pilot-metrics { grid-template-columns: 1fr 1fr; }
+}
