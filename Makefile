@@ -1,4 +1,4 @@
-.PHONY: install build test up down status smoke pilot import-production
+.PHONY: install build test up down status smoke studio-smoke pilot import-production
 
 DOCKER_COMPOSE ?= docker-compose
 
@@ -23,6 +23,9 @@ status:
 
 smoke:
 	python3 scripts/smoke.py --evaluation http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}
+
+studio-smoke:
+	python3 scripts/studio_smoke.py --evaluation http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}
 
 pilot:
 	python3 scripts/pilot.py --evaluation http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}

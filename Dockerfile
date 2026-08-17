@@ -17,7 +17,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY public ./public
 COPY datasets ./datasets
-RUN mkdir -p /var/lib/agent-evaluation/runs /var/lib/agent-evaluation/experiments /var/lib/agent-evaluation/pilots && chown -R node:node /var/lib/agent-evaluation
+RUN mkdir -p /var/lib/agent-evaluation/runs /var/lib/agent-evaluation/experiments /var/lib/agent-evaluation/pilots \
+    /var/lib/agent-evaluation/workspaces /var/lib/agent-evaluation/stage-experiments \
+    && chown -R node:node /var/lib/agent-evaluation
 USER node
 EXPOSE 8200
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=10 \

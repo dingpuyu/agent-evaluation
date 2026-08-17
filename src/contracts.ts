@@ -293,3 +293,92 @@ export interface PilotRun {
   error?: string;
   production_mutation: false;
 }
+
+export interface ProjectMessage {
+  message_id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export interface ProjectBrief {
+  project_name: string;
+  summary: string;
+  business_goal: string;
+  users: string[];
+  critical_tasks: string[];
+  failure_costs: string[];
+  available_data: string[];
+  constraints: string[];
+  unknowns: string[];
+  recommended_stage_id: "scope_judge" | "retrieval_judge" | "answer_judge" | "release_judge";
+  recommended_prompt_hypothesis: string;
+  recommended_first_evaluation: string;
+  readiness_score: number;
+}
+
+export interface EvaluationStudioStage {
+  stage_id: string;
+  name: string;
+  owner: "runtime" | "deterministic" | "llm_judge";
+  description: string;
+  metrics: string[];
+  baseline_prompt: string;
+  prompt_editable: boolean;
+  oracle_checks: string[];
+  hard_controls: string[];
+}
+
+export interface ProjectWorkspace {
+  workspace_id: string;
+  tenant_id: string;
+  requested_by: string;
+  target_id: string;
+  status: "discovery" | "ready";
+  created_at: string;
+  updated_at: string;
+  brief: ProjectBrief;
+  business_flow: EvaluationPlan["workflow"];
+  evaluation_chain: EvaluationStudioStage[];
+  messages: ProjectMessage[];
+  last_agent_steps: string[];
+}
+
+export interface StageJudgement {
+  pass: boolean;
+  score: number;
+  rationale: string;
+}
+
+export interface StageExperimentCaseResult {
+  case_id: string;
+  query: string;
+  oracle_pass: boolean;
+  baseline: StageJudgement;
+  candidate: StageJudgement;
+  outcome: "improved" | "regressed" | "unchanged";
+}
+
+export interface StagePromptExperiment {
+  stage_experiment_id: string;
+  workspace_id: string;
+  tenant_id: string;
+  requested_by: string;
+  target_id: string;
+  dataset_id: string;
+  stage_id: string;
+  stage_name: string;
+  baseline_prompt: string;
+  candidate_prompt: string;
+  started_at: string;
+  completed_at: string;
+  status: "completed";
+  baseline: { agreement: number; false_accepts: number; false_rejects: number; average_score: number };
+  candidate: { agreement: number; false_accepts: number; false_rejects: number; average_score: number };
+  delta: { agreement: number; false_accepts: number; false_rejects: number; average_score: number };
+  improved_cases: string[];
+  regressed_cases: string[];
+  results: StageExperimentCaseResult[];
+  recommendation: string;
+  production_mutation: false;
+}

@@ -9,6 +9,7 @@ import { loadDataset } from "./dataset.js";
 import { runPromptExperiment } from "./experiment.js";
 import { buildEvaluationPlan, comparePilotRuns, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
 import { evaluateRagBadCase, RAG_BAD_CASE_SUITE_ID, RAG_BAD_CASE_SUITE_VERSION } from "./runner.js";
+import { continueProjectDiscovery, createProjectWorkspace, EVALUATION_STUDIO_STAGES, runStagePromptExperiment } from "./studio.js";
 import { RunStore } from "./store.js";
 
 const config = loadConfig();
@@ -16,6 +17,8 @@ const baseAdapter = new RaglabAdapter(config.raglabAgentUrl, config.raglabApiUrl
 const store = new RunStore(config.dataDir);
 const activeSubjects = new Set<string>();
 const activePilots = new Set<string>();
+const activeWorkspaces = new Set<string>();
+const activeStageExperiments = new Set<string>();
 const publicDir = join(process.cwd(), "public");
 
 function writeJSON(response: ServerResponse, status: number, value: unknown) {
@@ -67,8 +70,8 @@ async function adminContext(request: IncomingMessage): Promise<{ identity: Ident
 }
 
 async function serveStatic(pathname: string, response: ServerResponse): Promise<boolean> {
-  const requested = pathname === "/" ? "index.html" : pathname.slice(1);
-  if (!/^(index\.html|app\.js|styles\.css|comparison\.css|platform\.css)$/.test(requested)) return false;
+  const requested = pathname === "/" ? "index.html" : pathname === "/studio" ? "studio.html" : pathname.slice(1);
+  if (!/^(index\.html|app\.js|styles\.css|comparison\.css|platform\.css|studio\.html|studio\.js|studio\.css)$/.test(requested)) return false;
   try {
     const body = await readFile(join(publicDir, requested));
     const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" }[extname(requested)] ?? "application/octet-stream";
@@ -91,7 +94,7 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/healthz") {
       writeJSON(response, 200, {
         status: "ok",
-        version: "0.2.0",
+        version: "0.3.0",
         runtime: "pi-agent-core",
         model: config.model,
         model_configured: Boolean(config.modelApiKey),
@@ -139,6 +142,103 @@ const server = createServer(async (request, response) => {
       const dataset = await loadDataset(config.datasetPath);
       const plan = buildEvaluationPlan(await adapter.getEvaluationContract(), dataset);
       writeJSON(response, 200, platformOverview({ plans: [plan], pilotRuns: await store.listPilots(identity) }));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/studio/stages") {
+      await adminContext(request);
+      writeJSON(response, 200, { stages: EVALUATION_STUDIO_STAGES });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/project-workspaces") {
+      const { identity } = await adminContext(request);
+      writeJSON(response, 200, { workspaces: await store.listWorkspaces(identity) });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/v1/project-workspaces") {
+      const { identity, adapter } = await adminContext(request);
+      const body = await readJSON(request);
+      const name = String(body.name ?? "").trim();
+      if (!name || name.length > 120) throw new UpstreamError(400, "project name must contain 1 to 120 characters");
+      const dataset = await loadDataset(config.datasetPath);
+      const plan = buildEvaluationPlan(await adapter.getEvaluationContract(String(body.app_id ?? "")), dataset);
+      const workspace = createProjectWorkspace(identity, plan, name);
+      await store.saveWorkspace(workspace);
+      writeJSON(response, 201, workspace);
+      return;
+    }
+    const workspaceMatch = url.pathname.match(/^\/api\/v1\/project-workspaces\/(workspace_[a-f0-9]{32})$/);
+    if (request.method === "GET" && workspaceMatch?.[1]) {
+      const { identity } = await adminContext(request);
+      const workspace = await store.getWorkspace(workspaceMatch[1], identity);
+      if (!workspace) throw new UpstreamError(404, "project workspace was not found or is not accessible");
+      writeJSON(response, 200, workspace);
+      return;
+    }
+    const messageMatch = url.pathname.match(/^\/api\/v1\/project-workspaces\/(workspace_[a-f0-9]{32})\/messages$/);
+    if (request.method === "POST" && messageMatch?.[1]) {
+      const { identity, adapter } = await adminContext(request);
+      const workspace = await store.getWorkspace(messageMatch[1], identity);
+      if (!workspace) throw new UpstreamError(404, "project workspace was not found or is not accessible");
+      if (activeWorkspaces.has(workspace.workspace_id)) throw new UpstreamError(409, "this project workspace is already processing a message");
+      const body = await readJSON(request);
+      const message = String(body.message ?? "").trim();
+      if (!message || message.length > 4000) throw new UpstreamError(400, "message must contain 1 to 4000 characters");
+      activeWorkspaces.add(workspace.workspace_id);
+      try {
+        const dataset = await loadDataset(config.datasetPath);
+        const updated = await continueProjectDiscovery({
+          config,
+          adapter,
+          workspace,
+          contract: await adapter.getEvaluationContract(),
+          dataset,
+          pilots: await store.listPilots(identity, 5),
+          userMessage: message,
+        });
+        await store.saveWorkspace(updated);
+        writeJSON(response, 200, updated);
+      } finally { activeWorkspaces.delete(workspace.workspace_id); }
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/stage-experiments") {
+      const { identity } = await adminContext(request);
+      writeJSON(response, 200, { experiments: await store.listStageExperiments(identity, url.searchParams.get("workspace_id") ?? "") });
+      return;
+    }
+    const stageExperimentMatch = url.pathname.match(/^\/api\/v1\/project-workspaces\/(workspace_[a-f0-9]{32})\/stage-experiments$/);
+    if (request.method === "POST" && stageExperimentMatch?.[1]) {
+      const { identity, adapter } = await adminContext(request);
+      const workspace = await store.getWorkspace(stageExperimentMatch[1], identity);
+      if (!workspace) throw new UpstreamError(404, "project workspace was not found or is not accessible");
+      const body = await readJSON(request);
+      const stageID = String(body.stage_id ?? "").trim();
+      const candidatePrompt = String(body.candidate_prompt ?? "").trim();
+      const stage = EVALUATION_STUDIO_STAGES.find((item) => item.stage_id === stageID);
+      if (!stage) throw new UpstreamError(400, "evaluation stage was not found");
+      if (!stage.prompt_editable) throw new UpstreamError(400, "deterministic and runtime stages do not accept prompt overrides");
+      if (!candidatePrompt || candidatePrompt.length > 5000) throw new UpstreamError(400, "candidate_prompt must contain 1 to 5000 characters");
+      const activeKey = `${workspace.workspace_id}:${stageID}`;
+      if (activeStageExperiments.has(activeKey)) throw new UpstreamError(409, "this stage experiment is already running");
+      activeStageExperiments.add(activeKey);
+      try {
+        const dataset = await loadDataset(config.datasetPath);
+        const contract = await adapter.getEvaluationContract(String(body.app_id ?? ""));
+        const plan = buildEvaluationPlan(contract, dataset);
+        const experiment = await runStagePromptExperiment({
+          config,
+          adapter,
+          identity,
+          workspace,
+          dataset,
+          appID: plan.app_id,
+          environmentID: plan.environment_id,
+          stageID,
+          candidatePrompt,
+          caseLimit: Number(body.case_limit ?? 4),
+        });
+        await store.saveStageExperiment(experiment);
+        writeJSON(response, 200, experiment);
+      } finally { activeStageExperiments.delete(activeKey); }
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/v1/plans/raglab-medical-sales-baseline-v1") {

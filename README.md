@@ -7,6 +7,8 @@
 1. **业务链路 → Prompt A/B**：识别可干预节点，使用脱敏生产型样本对 Baseline/Candidate 做隔离回放，比较任务成功、安全、引用和延迟。
 2. **Bad Case → 证据诊断**：Pi Agent Harness 读取人工期望、历史复测、当前只读 Replay 和 Query Trace，生成必须人工审核的根因与优化假设。
 
+平台还提供独立的 **Evaluation Studio**：通过项目梳理 Agent 对话补齐目标用户、关键任务、失败成本、可用数据和未知项；再选择范围、检索、答案或发布 Judge 阶段，编辑 Candidate Prompt，并在同一冻结观察集上比较其与确定性 Golden Oracle 的一致率、误放和误拒。
+
 平台第一阶段还提供一条完整试点链路：`Target Manifest → 业务 Workflow → Evaluation Plan → 冻结 Dataset → 异步 Baseline Run → Quality Gate → 干预节点建议`。它用于回答“这个 Agent 当前是否达标、失败发生在哪一层、下一步应该改什么”，然后才进入 Prompt 或检索策略实验。
 
 ## 为什么是独立项目
@@ -28,12 +30,15 @@ make status
 
 访问：<http://localhost:18200>
 
+项目梳理与阶段 Prompt 实验：<http://localhost:18200/studio>
+
 默认复用 `DEEPSEEK_API_KEY`。Key 只注入容器，不写入运行记录、数据集或仓库。
 
 真实端到端验证：
 
 ```bash
 make smoke
+make studio-smoke
 ```
 
 运行医疗 RAG Agent 的完整首轮基线（全部冻结样本）：
@@ -52,6 +57,10 @@ Pilot 是异步运行：创建请求立即返回 `202`，网页和脚本轮询�
 - `GET /api/v1/pilots/{pilot_run_id}`：查询逐题进度、门禁和干预建议。
 - `GET /api/v1/pilots/compare?baseline_id=...&candidate_id=...`：比较同一目标、同一数据快照的两次运行，返回指标增量、已修复用例和新增退化。
 - `POST /api/v1/experiments/prompt-comparisons`：在回答节点执行 Baseline/Candidate 对照。
+- `POST /api/v1/project-workspaces`：创建租户隔离的项目梳理工作区。
+- `POST /api/v1/project-workspaces/{id}/messages`：和 Evaluation Architect Agent 对话并更新项目 Brief。
+- `GET /api/v1/studio/stages`：读取锁定阶段与可编辑 Judge 阶段。
+- `POST /api/v1/project-workspaces/{id}/stage-experiments`：运行阶段 Prompt Baseline/Candidate 对照。
 
 所有平台资产都经过目标系统身份校验，并按租户隔离。
 

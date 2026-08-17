@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Agent Evaluation Studio — 对话梳理项目、设计评测链路并运行阶段 Prompt 对照实验">
+  <title>Evaluation Studio</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/studio.css">
+</head>
+<body class="studio-body">
+  <header class="studio-topbar">
+    <a class="brand" href="/studio"><span>AE</span><div><b>Evaluation Studio</b><small>Project → Chain → Experiment</small></div></a>
+    <nav><a href="/">质量总览</a><a class="active" href="/studio">项目梳理</a><a href="/#history">运行历史</a></nav>
+    <div class="studio-health"><i id="healthDot"></i><span id="healthText">连接中…</span></div>
+    <div class="studio-identity" id="identityBox"><small>尚未登录</small></div>
+  </header>
+
+  <main class="studio-main">
+    <section class="studio-hero">
+      <div><p class="eyebrow">EVALUATION ARCHITECT AGENT</p><h1>先把项目讲清楚，<br><em>再决定评测什么。</em></h1><p>让 Agent 读取已注册业务目标、流程、冻结样本和历史质量结果；通过对话补齐用户、任务、失败成本和数据边界，然后把结论变成可运行的评测链路。</p></div>
+      <div class="studio-hero-card"><span>当前连接</span><b>RAG Evolution Lab</b><small>只读 Target Contract · 冻结数据集 · 无生产写入</small></div>
+    </section>
+
+    <section class="studio-workspace-bar">
+      <label><span>项目工作区</span><select id="workspaceSelect"><option>加载中…</option></select></label>
+      <label class="new-project"><span>新项目名称</span><input id="projectName" value="医疗设备销售 Agent 评测设计" maxlength="120"></label>
+      <button id="createWorkspace">新建梳理</button>
+    </section>
+
+    <div class="studio-grid">
+      <section class="studio-card conversation-card">
+        <header><div><p class="eyebrow">01 / DISCOVERY CONVERSATION</p><h2>和评测架构 Agent 对话</h2></div><span class="live-chip">Pi + DeepSeek</span></header>
+        <div class="starter-prompts" id="starterPrompts">
+          <button data-message="请基于当前已连接的 RAG Agent、冻结数据集和最近评测结果，先帮我梳理现状，并指出还缺哪些业务信息。">分析当前 RAG 项目</button>
+          <button data-message="这个项目面向医疗设备采购客户，核心任务是产品认知、型号比较和安全售后分诊。请帮我找最值得评测的业务切入点。">明确业务目标</button>
+          <button data-message="请从生产上线角度检查失败成本、权限、安全、数据和发布门禁，列出我还需要补充的问题。">检查生产风险</button>
+        </div>
+        <div class="chat-thread" id="chatThread"><div class="studio-empty">选择或创建项目后开始对话。</div></div>
+        <form class="chat-composer" id="chatForm">
+          <textarea id="chatInput" rows="3" maxlength="4000" placeholder="描述你的项目、用户、关键任务、失败案例或可用数据……"></textarea>
+          <footer><span>Agent 只能读取当前租户授权的评测资产</span><button type="submit" id="sendMessage">发送并更新 Brief</button></footer>
+        </form>
+      </section>
+
+      <aside class="studio-card brief-card">
+        <header><div><p class="eyebrow">02 / LIVING PROJECT BRIEF</p><h2>实时项目 Brief</h2></div><div class="readiness"><b id="readinessScore">0%</b><span>评测就绪度</span></div></header>
+        <div class="readiness-track"><i id="readinessBar"></i></div>
+        <section class="brief-summary"><small>当前理解</small><h3 id="briefName">等待项目</h3><p id="briefSummary">对话后会持续更新，不确定的信息不会被模型擅自补齐。</p></section>
+        <div class="brief-block"><small>业务目标</small><p id="briefGoal">—</p></div>
+        <div class="brief-columns">
+          <div class="brief-block"><small>目标用户</small><div id="briefUsers" class="brief-tags"></div></div>
+          <div class="brief-block"><small>关键任务</small><div id="briefTasks" class="brief-tags"></div></div>
+          <div class="brief-block risk"><small>失败成本</small><div id="briefRisks" class="brief-tags"></div></div>
+          <div class="brief-block"><small>可用数据</small><div id="briefData" class="brief-tags"></div></div>
+        </div>
+        <div class="brief-block unknown"><small>仍需确认</small><ul id="briefUnknowns"><li>等待对话</li></ul></div>
+        <div class="first-eval"><small>建议的第一个评测</small><b id="firstStage">—</b><p id="firstHypothesis">—</p><p id="firstEvaluation">—</p></div>
+        <div class="agent-steps" id="agentSteps"></div>
+      </aside>
+    </div>
+
+    <section class="studio-card chain-card">
+      <header><div><p class="eyebrow">03 / EVALUATION CHAIN</p><h2>评测链路与 Prompt 干预点</h2><p>运行时与确定性阶段锁定；模型 Judge 阶段可以逐一编辑，并用同一冻结观察结果做对照。</p></div><span class="safe-chip">Hard gates stay immutable</span></header>
+      <div class="evaluation-chain" id="evaluationChain"><div class="studio-empty">登录后加载评测链路。</div></div>
+    </section>
+
+    <section class="studio-card prompt-lab" id="promptLab">
+      <header><div><p class="eyebrow">04 / STAGE PROMPT LAB</p><h2 id="stageTitle">选择一个可编辑阶段</h2><p id="stageDescription">Baseline 与 Candidate 使用同一 Target 输出；比较的是评测 Prompt 对 Golden Oracle 的判断准确度。</p></div><span class="stage-owner" id="stageOwner">—</span></header>
+      <div class="stage-metrics" id="stageMetrics"></div>
+      <div class="studio-prompt-grid">
+        <article><header><b>BASELINE PROMPT</b><span>当前版本 · 只读</span></header><pre id="stageBaseline">—</pre></article>
+        <article class="candidate"><header><b>CANDIDATE PROMPT</b><span>仅本次实验</span></header><textarea id="stageCandidate" rows="12" maxlength="5000"></textarea><footer><label>冻结样本<select id="stageCaseLimit"><option value="2">2 条 / 快速</option><option value="4" selected>4 条 / 推荐</option><option value="8">8 条 / 完整</option></select></label><button id="runStageExperiment">运行阶段对照</button></footer></article>
+      </div>
+      <div class="stage-result" id="stageResult"><div class="studio-empty">编辑 Candidate 后运行，查看一致率、误放、误拒和逐题变化。</div></div>
+    </section>
+
+    <section class="studio-card experiment-history-card">
+      <header><div><p class="eyebrow">05 / EXPERIMENT HISTORY</p><h2>阶段实验记录</h2></div></header>
+      <div id="stageHistory" class="stage-history"><div class="studio-empty">当前项目暂无阶段实验。</div></div>
+    </section>
+  </main>
+
+  <div class="login-layer" id="loginLayer">
+    <form class="login-card" id="loginForm">
+      <span class="login-mark">AE</span><p class="eyebrow">AUTHORIZED EVALUATION</p><h2>进入项目梳理工作台</h2>
+      <p>使用 RAG Evolution Lab 管理员身份。访问令牌只保存在当前浏览器，不写入项目 Brief 或实验记录。</p>
+      <label>邮箱<input id="email" type="email" value="alice@tenant-a.local" autocomplete="username" required></label>
+      <label>密码<input id="password" type="password" value="RagLab-Alice-2026!" autocomplete="current-password" required></label>
+      <button type="submit">登录并读取授权资产</button><small id="loginError"></small>
+    </form>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/studio.js"></script>
+</body>
+</html>

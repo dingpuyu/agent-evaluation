@@ -25,6 +25,8 @@ Target Manifest
           └─ Bad Case Diagnosis（证据化根因分析）
 ```
 
+Evaluation Studio 在这组对象前增加一个可持续更新的 `Project Workspace`：项目梳理 Agent 读取注册 Target、冻结 Dataset 与最近 Pilot，和用户一起形成 Project Brief；Brief 再关联一组 `Stage Prompt Experiment`。Stage 实验评价的是 Judge Prompt 对确定性 Oracle 的一致性，不允许修改 Target 权限、冻结观察或硬门禁。详细设计见 [Evaluation Studio](evaluation-studio.md)。
+
 第一阶段只有一个 Target Adapter，但 Plan、Run、Dataset 和 Gate 已经脱离具体 UI。新增 Agent 时应实现 Adapter 和 Workflow Contract，而不是复制一套评测服务。
 
 ## 2. Target Adapter

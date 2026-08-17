@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { EvaluationRun, PilotRun } from "../src/contracts.js";
+import type { EvaluationRun, PilotRun, ProjectWorkspace, StagePromptExperiment } from "../src/contracts.js";
 import { RunStore } from "../src/store.js";
 
 test("persists runs and preserves tenant isolation", async () => {
@@ -21,5 +21,15 @@ test("persists runs and preserves tenant isolation", async () => {
     await store.savePilot(pilot);
     assert.equal((await store.listPilots({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] })).length, 1);
     assert.equal(await store.getPilot(pilot.pilot_run_id, { subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }), undefined);
+
+    const workspace = { workspace_id: `workspace_${"c".repeat(32)}`, tenant_id: "tenant_a", updated_at: new Date().toISOString() } as ProjectWorkspace;
+    await store.saveWorkspace(workspace);
+    assert.equal((await store.listWorkspaces({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] })).length, 1);
+    assert.equal(await store.getWorkspace(workspace.workspace_id, { subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }), undefined);
+
+    const stageExperiment = { stage_experiment_id: `stageexp_${"d".repeat(32)}`, workspace_id: workspace.workspace_id, tenant_id: "tenant_a", started_at: new Date().toISOString() } as StagePromptExperiment;
+    await store.saveStageExperiment(stageExperiment);
+    assert.equal((await store.listStageExperiments({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] }, workspace.workspace_id)).length, 1);
+    assert.equal((await store.listStageExperiments({ subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }, workspace.workspace_id)).length, 0);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

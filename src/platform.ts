@@ -152,7 +152,7 @@ export async function executePilotRun(input: {
 export function platformOverview(input: { plans: EvaluationPlan[]; pilotRuns: PilotRun[] }) {
   const latest = input.pilotRuns[0];
   return {
-    platform: { name: "Agent Evaluation", version: "0.2.0", stage: "pilot" },
+    platform: { name: "Agent Evaluation", version: "0.3.0", stage: "studio" },
     targets: [RAGLAB_TARGET],
     plans: input.plans.map((plan) => ({ plan_id: plan.plan_id, target_id: plan.target_id, name: plan.name, dataset_cases: plan.dataset.case_count, workflow_nodes: plan.workflow.length })),
     latest_pilot: latest ? { pilot_run_id: latest.pilot_run_id, status: latest.status, gate_passed: latest.gate_passed, cases_completed: latest.cases_completed, total_cases: latest.total_cases } : null,

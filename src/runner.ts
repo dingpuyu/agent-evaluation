@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Agent, type AgentTool } from "@earendil-works/pi-agent-core";
-import { createModels, createProvider, envApiKeyAuth, Type, type Model } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { Type } from "@earendil-works/pi-ai";
 
 import { RaglabAdapter, UpstreamError } from "./adapters/raglab.js";
 import type { EvaluationConfig } from "./config.js";
 import { ROOT_CAUSES, type BadCase, type DiagnosisReport, type EvaluationEvent, type EvaluationRun, type Identity, type ReplayResult } from "./contracts.js";
 import { buildRunMetrics } from "./metrics.js";
+import { createEvaluatorModel } from "./model.js";
 import { ToolPolicy } from "./policy.js";
 
 export const RAG_BAD_CASE_SUITE_ID = "raglab.medical.bad-case.v1";
@@ -20,38 +20,6 @@ interface RunContext {
 
 function jsonResult(value: unknown, details: Record<string, unknown> = {}) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value) }], details };
-}
-
-function createModel(config: EvaluationConfig) {
-  const model: Model<"openai-completions"> = {
-    id: config.model,
-    name: config.model,
-    api: "openai-completions",
-    provider: "agent-evaluation-openai-compatible",
-    baseUrl: config.modelBaseUrl,
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 64_000,
-    maxTokens: 4_096,
-    compat: {
-      supportsDeveloperRole: false,
-      supportsReasoningEffort: false,
-      supportsStrictMode: false,
-      maxTokensField: "max_tokens",
-    },
-  };
-  const provider = createProvider({
-    id: "agent-evaluation-openai-compatible",
-    name: "Agent Evaluation OpenAI-compatible Provider",
-    baseUrl: config.modelBaseUrl,
-    auth: { apiKey: envApiKeyAuth("Agent evaluator model API key", ["EVALUATION_MODEL_API_KEY", "DEEPSEEK_API_KEY", "RAGLAB_GENERATION_API_KEY"]) },
-    models: [model],
-    api: openAICompletionsApi(),
-  });
-  const models = createModels();
-  models.setProvider(provider);
-  return { model, models };
 }
 
 function createTools(adapter: RaglabAdapter, badCaseID: string, run: RunContext): AgentTool[] {
@@ -174,7 +142,7 @@ export async function evaluateRagBadCase(
   const events: EvaluationEvent[] = [];
   let turnCount = 0;
   let assistantText = "";
-  const { model, models } = createModel(config);
+  const { model, models } = createEvaluatorModel(config);
   const agent = new Agent({
     initialState: {
       systemPrompt: `You are an Agent Evaluation Engineer. Diagnose one fixed evaluation subject using only auditable evidence from the registered tools. You evaluate the target system; you do not answer the user's original medical question.
