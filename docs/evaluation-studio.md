@@ -42,6 +42,8 @@ Brief 持续保存项目名称、业务目标、用户、关键任务、失败�
 
 这种设计避免把“Judge 更宽松”误当成“质量提升”。Candidate 若在 Golden Oracle 上新增误放或误拒，会被明确标记为退化。所有实验 `production_mutation=false`，仍需人工审核后才能替换正式评测 Prompt。
 
+每次实验必须选择一个数据分层并记录完整快照：Development 可反复实验；Holdout 的问题和 Golden 在运行前不会通过数据集 API 或项目梳理工具暴露；Regression 固化历史 Bad Case。只有 Development 确认有收益后才进入 Holdout，Holdout 通过后才进入 Regression。若没有测得收益，平台保持 `iterate`，不会因为分数相同就推荐发布。
+
 ## 当前边界
 
 - 首个注册 Target 仍是 `rag-evolution-lab`；新项目可以通过对话梳理，但执行回放前必须开发并注册对应 Target Adapter。

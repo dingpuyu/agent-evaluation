@@ -13,7 +13,7 @@ services:
       EVALUATION_MAX_TOOL_CALLS: ${EVALUATION_MAX_TOOL_CALLS:-8}
       EVALUATION_TIMEOUT_MS: ${EVALUATION_TIMEOUT_MS:-90000}
       EVALUATION_DATA_DIR: /var/lib/agent-evaluation
-      EVALUATION_DATASET_PATH: /app/datasets/raglab-medical-sales-production-sample-v1.json
+      EVALUATION_DATASET_PATH: /app/datasets/raglab-medical-sales-production-sample-v2.json
     extra_hosts:
       - host.docker.internal:host-gateway
     ports:

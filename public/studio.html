@@ -70,7 +70,7 @@
       <div class="stage-metrics" id="stageMetrics"></div>
       <div class="studio-prompt-grid">
         <article><header><b>BASELINE PROMPT</b><span>当前版本 · 只读</span></header><pre id="stageBaseline">—</pre></article>
-        <article class="candidate"><header><b>CANDIDATE PROMPT</b><span>仅本次实验</span></header><textarea id="stageCandidate" rows="12" maxlength="5000"></textarea><footer><label>冻结样本<select id="stageCaseLimit"><option value="2">2 条 / 快速</option><option value="4" selected>4 条 / 推荐</option><option value="8">8 条 / 完整</option></select></label><button id="runStageExperiment">运行阶段对照</button></footer></article>
+        <article class="candidate"><header><b>CANDIDATE PROMPT</b><span>仅本次实验</span></header><textarea id="stageCandidate" rows="12" maxlength="5000"></textarea><footer><div class="stage-controls"><label>数据分层<select id="stageDatasetSplit"><option value="development" selected>Development · 可调试</option><option value="holdout">Holdout · 问题盲测</option><option value="regression">Regression · 发布门禁</option></select></label><label>冻结样本<select id="stageCaseLimit"><option value="2">2 条 / 快速</option><option value="4" selected>4 条 / 推荐</option><option value="8">8 条 / 完整</option></select></label></div><button id="runStageExperiment">运行阶段对照</button></footer></article>
       </div>
       <div class="stage-result" id="stageResult"><div class="studio-empty">编辑 Candidate 后运行，查看一致率、误放、误拒和逐题变化。</div></div>
     </section>

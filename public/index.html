@@ -60,13 +60,14 @@
         <div class="section-heading"><div><p class="eyebrow">02 / CONTROLLED EXPERIMENT</p><h2>Prompt Baseline / Candidate</h2><p>候选提示词只注入回答生成节点。权限、拒答、证据校验等硬规则不可覆盖。</p></div><span class="tag mint">零生产写入</span></div>
         <div class="prompt-grid">
           <div class="prompt-card readonly"><header><b>Baseline</b><span>当前生产提示词</span></header><pre id="baselinePrompt">登录后加载…</pre></div>
-          <div class="prompt-card candidate"><header><b>Candidate Overlay</b><span>仅本次评测生效</span></header><textarea id="candidatePrompt" rows="12">回答先给一句话结论，再按“适用范围、关键事实、需要进一步核验的内容”组织。面向小白解释首次出现的专业术语；每条产品差异必须能对应引用证据，不能从型号名称推断配置。</textarea><footer><label>回放样本<select id="caseLimit"><option value="3">3 条 / 快速验证</option><option value="4" selected>4 条 / 推荐</option><option value="8">8 条 / 完整样本</option></select></label><button id="runExperiment">运行对照评测</button></footer></div>
+          <div class="prompt-card candidate"><header><b>Candidate Overlay</b><span>仅本次评测生效</span></header><textarea id="candidatePrompt" rows="12">回答先给一句话结论，再按“适用范围、关键事实、需要进一步核验的内容”组织。面向小白解释首次出现的专业术语；每条产品差异必须能对应引用证据，不能从型号名称推断配置。</textarea><footer><div class="experiment-controls"><label>数据分层<select id="experimentSplit"><option value="development" selected>Development · 调试</option><option value="holdout">Holdout · 盲测</option><option value="regression">Regression · 发布回归</option></select></label><label>回放样本<select id="caseLimit"><option value="3">3 条 / 快速验证</option><option value="4" selected>4 条 / 推荐</option><option value="8">8 条 / 完整样本</option></select></label></div><button id="runExperiment">运行对照评测</button></footer></div>
         </div>
         <div id="experimentResult" class="result-slot"><div class="empty">编辑候选提示词并运行，结果会显示改善、退化和未变化案例。</div></div>
       </section>
 
       <section id="dataset" class="panel">
         <div class="section-heading"><div><p class="eyebrow">03 / PRODUCTION REPLAY SET</p><h2>脱敏生产型数据集</h2><p id="datasetDescription">当前样本不包含患者信息，来源与真实性边界会明确展示。</p></div><span class="tag" id="datasetMeta">—</span></div>
+        <div class="dataset-splits" id="datasetSplits"></div>
         <div class="dataset-table" id="datasetTable"><div class="empty">登录后加载数据集</div></div>
       </section>
 

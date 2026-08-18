@@ -9,6 +9,8 @@
 
 平台还提供独立的 **Evaluation Studio**：通过项目梳理 Agent 对话补齐目标用户、关键任务、失败成本、可用数据和未知项；再选择范围、检索、答案或发布 Judge 阶段，编辑 Candidate Prompt，并在同一冻结观察集上比较其与确定性 Golden Oracle 的一致率、误放和误拒。
 
+从 v0.4 起，生产形态评测集按 **Development / Holdout / Regression** 三层冻结：Development 用于形成 Prompt 假设，Holdout 在运行前隐藏问题文本，Regression 固化已确认 Bad Case 与安全门禁。实验记录数据版本、SHA-256 快照和所用分层，避免用同一批可见题反复调参造成虚假提升。
+
 平台第一阶段还提供一条完整试点链路：`Target Manifest → 业务 Workflow → Evaluation Plan → 冻结 Dataset → 异步 Baseline Run → Quality Gate → 干预节点建议`。它用于回答“这个 Agent 当前是否达标、失败发生在哪一层、下一步应该改什么”，然后才进入 Prompt 或检索策略实验。
 
 ## 为什么是独立项目
@@ -39,6 +41,7 @@ make status
 ```bash
 make smoke
 make studio-smoke
+make split-smoke
 ```
 
 运行医疗 RAG Agent 的完整首轮基线（全部冻结样本）：
@@ -61,6 +64,14 @@ Pilot 是异步运行：创建请求立即返回 `202`，网页和脚本轮询�
 - `POST /api/v1/project-workspaces/{id}/messages`：和 Evaluation Architect Agent 对话并更新项目 Brief。
 - `GET /api/v1/studio/stages`：读取锁定阶段与可编辑 Judge 阶段。
 - `POST /api/v1/project-workspaces/{id}/stage-experiments`：运行阶段 Prompt Baseline/Candidate 对照。
+
+Prompt 与阶段实验均可传 `dataset_split=development|holdout|regression`。推荐晋级顺序是：
+
+```text
+Development 形成假设 → Holdout 盲测 → Regression 发布回归 → 人工审核
+```
+
+详细策略见 [三层数据集与发布门禁](docs/dataset-split-gates.md)。
 
 所有平台资产都经过目标系统身份校验，并按租户隔离。
 

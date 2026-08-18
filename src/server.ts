@@ -4,8 +4,8 @@ import { extname, join } from "node:path";
 
 import { RaglabAdapter, UpstreamError } from "./adapters/raglab.js";
 import { loadConfig } from "./config.js";
-import type { Identity } from "./contracts.js";
-import { loadDataset } from "./dataset.js";
+import type { DatasetSplit, Identity } from "./contracts.js";
+import { DATASET_SPLITS, datasetForSplit, datasetSplitSummary, loadDataset, publicDatasetView } from "./dataset.js";
 import { runPromptExperiment } from "./experiment.js";
 import { buildEvaluationPlan, comparePilotRuns, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
 import { evaluateRagBadCase, RAG_BAD_CASE_SUITE_ID, RAG_BAD_CASE_SUITE_VERSION } from "./runner.js";
@@ -20,6 +20,12 @@ const activePilots = new Set<string>();
 const activeWorkspaces = new Set<string>();
 const activeStageExperiments = new Set<string>();
 const publicDir = join(process.cwd(), "public");
+
+function datasetSplit(value: unknown, fallback: DatasetSplit): DatasetSplit {
+  const split = String(value ?? fallback) as DatasetSplit;
+  if (!DATASET_SPLITS.includes(split)) throw new UpstreamError(400, "dataset_split must be development, holdout or regression");
+  return split;
+}
 
 function writeJSON(response: ServerResponse, status: number, value: unknown) {
   response.statusCode = status;
@@ -94,7 +100,7 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/healthz") {
       writeJSON(response, 200, {
         status: "ok",
-        version: "0.3.0",
+        version: "0.4.0",
         runtime: "pi-agent-core",
         model: config.model,
         model_configured: Boolean(config.modelApiKey),
@@ -111,7 +117,7 @@ const server = createServer(async (request, response) => {
           { id: RAG_BAD_CASE_SUITE_ID, version: RAG_BAD_CASE_SUITE_VERSION, name: "RAG Bad Case Evidence Diagnosis", dimensions: ["task", "tool_use", "retrieval", "grounding", "safety", "observability", "performance"] },
           { id: "raglab.medical-sales.prompt-ab.v1", version: "1.0.0", name: "Medical Sales Agent Prompt A/B", dimensions: ["task", "grounding", "safety", "performance"] },
         ],
-        datasets: [{ id: dataset.dataset_id, name: dataset.name, version: dataset.version, provenance: dataset.provenance, cases: dataset.cases.length }],
+        datasets: [{ id: dataset.dataset_id, name: dataset.name, version: dataset.version, snapshot_id: dataset.snapshot_id, provenance: dataset.provenance, cases: dataset.cases.length, splits: datasetSplitSummary(dataset) }],
       });
       return;
     }
@@ -134,7 +140,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/v1/datasets/production-sample") {
       await adminContext(request);
-      writeJSON(response, 200, await loadDataset(config.datasetPath));
+      writeJSON(response, 200, publicDatasetView(await loadDataset(config.datasetPath)));
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/v1/platform/overview") {
@@ -213,11 +219,12 @@ const server = createServer(async (request, response) => {
       const body = await readJSON(request);
       const stageID = String(body.stage_id ?? "").trim();
       const candidatePrompt = String(body.candidate_prompt ?? "").trim();
+      const selectedSplit = datasetSplit(body.dataset_split, "development");
       const stage = EVALUATION_STUDIO_STAGES.find((item) => item.stage_id === stageID);
       if (!stage) throw new UpstreamError(400, "evaluation stage was not found");
       if (!stage.prompt_editable) throw new UpstreamError(400, "deterministic and runtime stages do not accept prompt overrides");
       if (!candidatePrompt || candidatePrompt.length > 5000) throw new UpstreamError(400, "candidate_prompt must contain 1 to 5000 characters");
-      const activeKey = `${workspace.workspace_id}:${stageID}`;
+      const activeKey = `${workspace.workspace_id}:${stageID}:${selectedSplit}`;
       if (activeStageExperiments.has(activeKey)) throw new UpstreamError(409, "this stage experiment is already running");
       activeStageExperiments.add(activeKey);
       try {
@@ -235,6 +242,7 @@ const server = createServer(async (request, response) => {
           stageID,
           candidatePrompt,
           caseLimit: Number(body.case_limit ?? 4),
+          datasetSplit: selectedSplit,
         });
         await store.saveStageExperiment(experiment);
         writeJSON(response, 200, experiment);
@@ -243,7 +251,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/v1/plans/raglab-medical-sales-baseline-v1") {
       const { adapter } = await adminContext(request);
-      const dataset = await loadDataset(config.datasetPath);
+      const dataset = datasetForSplit(await loadDataset(config.datasetPath), "regression");
       writeJSON(response, 200, buildEvaluationPlan(await adapter.getEvaluationContract(), dataset));
       return;
     }
@@ -275,7 +283,7 @@ const server = createServer(async (request, response) => {
       const { identity, adapter } = await adminContext(request);
       const activeKey = `${identity.tenant_id}:raglab-medical-sales-baseline-v1`;
       if (activePilots.has(activeKey)) throw new UpstreamError(409, "this tenant pilot is already running");
-      const dataset = await loadDataset(config.datasetPath);
+      const dataset = datasetForSplit(await loadDataset(config.datasetPath), "regression");
       const plan = buildEvaluationPlan(await adapter.getEvaluationContract(), dataset);
       const run = createPilotRun(plan, identity);
       await store.savePilot(run);
@@ -333,6 +341,7 @@ const server = createServer(async (request, response) => {
       if (!promptOverlay || promptOverlay.length > 5000) throw new UpstreamError(400, "prompt_overlay must contain 1 to 5000 characters");
       const appID = String(body.app_id ?? `${identity.tenant_id}-medical-device-customer-agent`);
       const environmentID = String(body.environment_id ?? `${appID}-dev`);
+      const selectedSplit = datasetSplit(body.dataset_split, "development");
       // Contract lookup authorizes the selected app before the comparison can incur model cost.
       await adapter.getEvaluationContract(appID);
       const experiment = await runPromptExperiment({
@@ -343,6 +352,7 @@ const server = createServer(async (request, response) => {
         environmentID,
         promptOverlay,
         caseLimit: Number(body.case_limit ?? 4),
+        datasetSplit: selectedSplit,
       });
       await store.saveExperiment(experiment);
       writeJSON(response, 200, experiment);

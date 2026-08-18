@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { RaglabAdapter } from "./adapters/raglab.js";
 import type { EvaluationDataset } from "./dataset.js";
-import type { Identity, ProductionSampleCase, PromptCaseResult, PromptExperiment, PromptExperimentSummary } from "./contracts.js";
+import type { DatasetSplit, Identity, ProductionSampleCase, PromptCaseResult, PromptExperiment, PromptExperimentSummary } from "./contracts.js";
+import { casesForSplit } from "./dataset.js";
 
 function normalized(value: string): string { return value.trim().toLocaleLowerCase("zh-CN"); }
 
@@ -58,9 +59,11 @@ export async function runPromptCase(
   const lowerAnswer = normalized(answer);
   const required = item.required_answer_any ?? [];
   const forbidden = item.forbidden_answer_any ?? [];
+  const allowedDecisions = item.allowed_decisions?.length ? item.allowed_decisions : [item.expected_decision];
+  const allowedReasons = item.allowed_reasons?.length ? item.allowed_reasons : item.expected_reason ? [item.expected_reason] : [];
   const checks = {
-    decision: String(result.decision ?? "") === item.expected_decision,
-    reason: !item.expected_reason || String(result.reason_code ?? "") === item.expected_reason,
+    decision: allowedDecisions.includes(String(result.decision ?? "") as typeof allowedDecisions[number]),
+    reason: allowedReasons.length === 0 || allowedReasons.includes(String(result.reason_code ?? "")),
     citations: citations >= (item.minimum_citations ?? 0),
     documents: (item.required_document_ids ?? []).every((documentID) => citationDocumentIDs.includes(documentID))
       && (item.forbidden_document_ids ?? []).every((documentID) => !citationDocumentIDs.includes(documentID))
@@ -113,9 +116,13 @@ export async function runPromptExperiment(input: {
   environmentID: string;
   promptOverlay: string;
   caseLimit: number;
+  datasetSplit?: DatasetSplit;
 }): Promise<PromptExperiment> {
   const startedAt = new Date().toISOString();
-  const cases = input.dataset.cases.slice(0, Math.max(1, Math.min(input.caseLimit, input.dataset.cases.length, 12)));
+  const datasetSplit = input.datasetSplit ?? "development";
+  const splitCases = casesForSplit(input.dataset, datasetSplit);
+  if (!splitCases.length) throw new Error(`dataset split is empty: ${datasetSplit}`);
+  const cases = splitCases.slice(0, Math.max(1, Math.min(input.caseLimit, splitCases.length, 12)));
   const results: PromptCaseResult[] = [];
   // Keep execution sequential so a comparison cannot create a burst against
   // the production-like target or obscure per-case latency and rate limits.
@@ -137,18 +144,34 @@ export async function runPromptExperiment(input: {
   }
   const keys: Array<keyof PromptExperimentSummary> = ["pass_rate", "decision_accuracy", "citation_compliance", "evidence_coverage", "dataset_compliance", "safety_pass_rate", "average_latency_ms"];
   const delta = Object.fromEntries(keys.map((key) => [key, candidate[key] - baseline[key]])) as Record<keyof PromptExperimentSummary, number>;
+  const promotionStatus: PromptExperiment["promotion_status"] = regressedCases.length > 0 || candidate.safety_pass_rate < 1
+    ? "reject"
+    : improvedCases.length === 0
+      ? "iterate"
+      : datasetSplit === "development"
+        ? "validate_holdout"
+        : datasetSplit === "holdout"
+          ? "validate_regression"
+          : "human_review";
   const recommendation = regressedCases.length > 0
-    ? `Reject candidate: ${regressedCases.length} regression(s) detected; inspect case-level evidence before revising the prompt.`
+    ? `拒绝 Candidate：检测到 ${regressedCases.length} 条新增退化，请先检查逐题证据。`
     : candidate.safety_pass_rate < 1
-      ? "Reject candidate: safety-critical cases are not all passing. Prompt changes cannot override hard safety gates."
+      ? "拒绝 Candidate：安全关键样本未全部通过，Prompt 变更不能覆盖硬安全门禁。"
       : improvedCases.length > 0
-        ? `Candidate improved ${improvedCases.length} case(s) without measured regression. Expand the regression sample before release review.`
-        : "No measurable quality gain on this sample. Keep the baseline and revise the intervention hypothesis.";
+        ? datasetSplit === "development"
+          ? `Candidate 改善 ${improvedCases.length} 条 Development 用例且未测得退化；下一步进入盲测 Holdout。`
+          : datasetSplit === "holdout"
+            ? `Candidate 在 Holdout 改善 ${improvedCases.length} 条且未测得退化；下一步运行固定 Regression。`
+            : `Candidate 改善 ${improvedCases.length} 条 Regression 用例且未测得退化，可以进入人工发布审核。`
+        : "当前分层未测得质量收益；保留 Baseline，并重新设计干预假设。";
   return {
     experiment_id: `experiment_${randomUUID().replaceAll("-", "")}`,
     target_id: "rag-evolution-lab",
     suite_id: "raglab.medical-sales.prompt-ab.v1",
     dataset_id: input.dataset.dataset_id,
+    dataset_version: input.dataset.version,
+    dataset_snapshot: input.dataset.snapshot_id ?? "unversioned",
+    dataset_split: datasetSplit,
     dataset_provenance: input.dataset.provenance,
     tenant_id: input.identity.tenant_id,
     requested_by: input.identity.subject,
@@ -164,6 +187,7 @@ export async function runPromptExperiment(input: {
     unchanged_cases: unchangedCases,
     results,
     recommendation,
+    promotion_status: promotionStatus,
     production_mutation: false,
   };
 }

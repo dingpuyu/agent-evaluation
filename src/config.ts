@@ -32,7 +32,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EvaluationConf
     maxToolCalls: positiveInt(env.EVALUATION_MAX_TOOL_CALLS, 8),
     timeoutMs: positiveInt(env.EVALUATION_TIMEOUT_MS, 90_000),
     dataDir: env.EVALUATION_DATA_DIR?.trim() || "./data",
-    datasetPath: env.EVALUATION_DATASET_PATH?.trim() || "./datasets/raglab-medical-sales-production-sample-v1.json",
+    datasetPath: env.EVALUATION_DATASET_PATH?.trim() || "./datasets/raglab-medical-sales-production-sample-v2.json",
     corsOrigins: new Set((env.EVALUATION_CORS_ORIGINS || "http://localhost:18200,http://127.0.0.1:18200")
       .split(",").map((value) => value.trim()).filter(Boolean)),
   };

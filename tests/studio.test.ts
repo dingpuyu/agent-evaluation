@@ -32,9 +32,14 @@ const dataset: EvaluationDataset = {
   provenance: "synthetic",
   contains_patient_data: false,
   description: "test",
+  split_policy: {
+    development: { purpose: "test", prompt_visible: true, case_count: 2 },
+    holdout: { purpose: "test", prompt_visible: false, case_count: 0 },
+    regression: { purpose: "test", prompt_visible: true, case_count: 0 },
+  },
   cases: [
-    { id: "pass", segment: "sales", query: "产品是什么", expected_decision: "answer", minimum_citations: 1, required_document_ids: ["doc-1"] },
-    { id: "fail", segment: "sales", query: "另一产品是什么", expected_decision: "answer", minimum_citations: 1, required_document_ids: ["doc-2"] },
+    { id: "pass", split: "development", segment: "sales", query: "产品是什么", expected_decision: "answer", minimum_citations: 1, required_document_ids: ["doc-1"] },
+    { id: "fail", split: "development", segment: "sales", query: "另一产品是什么", expected_decision: "answer", minimum_citations: 1, required_document_ids: ["doc-2"] },
   ],
 };
 
@@ -96,5 +101,7 @@ test("compares a selected judge stage against the deterministic oracle", async (
   assert.equal(experiment.candidate.agreement, 1);
   assert.deepEqual(experiment.improved_cases, ["fail"]);
   assert.deepEqual(experiment.regressed_cases, []);
+  assert.equal(experiment.dataset_split, "development");
+  assert.equal(experiment.promotion_status, "validate_holdout");
   assert.equal(experiment.production_mutation, false);
 });

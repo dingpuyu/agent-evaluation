@@ -11,7 +11,7 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production AGENT_EVALUATION_HOST=0.0.0.0 AGENT_EVALUATION_INTERNAL_PORT=8200 \
     EVALUATION_DATA_DIR=/var/lib/agent-evaluation \
-    EVALUATION_DATASET_PATH=/app/datasets/raglab-medical-sales-production-sample-v1.json
+    EVALUATION_DATASET_PATH=/app/datasets/raglab-medical-sales-production-sample-v2.json
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist

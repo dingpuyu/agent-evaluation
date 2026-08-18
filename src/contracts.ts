@@ -18,6 +18,7 @@ export const ROOT_CAUSES = [
 
 export type RootCause = (typeof ROOT_CAUSES)[number];
 export type EvaluationDimension = "task" | "tool_use" | "retrieval" | "grounding" | "safety" | "observability" | "performance" | "cost";
+export type DatasetSplit = "development" | "holdout" | "regression";
 
 export interface Identity {
   subject: string;
@@ -150,11 +151,16 @@ export interface EvaluationRun {
 
 export interface ProductionSampleCase {
   id: string;
+  split: DatasetSplit;
   segment: string;
   query: string;
+  source_kind?: "synthetic_seed" | "sanitized_production_pattern" | "confirmed_bad_case";
+  risk_tags?: string[];
   device_context?: DeviceContext;
   expected_decision: "answer" | "clarify" | "refuse";
   expected_reason?: string;
+  allowed_decisions?: Array<"answer" | "clarify" | "refuse">;
+  allowed_reasons?: string[];
   minimum_citations?: number;
   required_document_ids?: string[];
   forbidden_document_ids?: string[];
@@ -197,6 +203,9 @@ export interface PromptExperiment {
   target_id: string;
   suite_id: string;
   dataset_id: string;
+  dataset_version: string;
+  dataset_snapshot: string;
+  dataset_split: DatasetSplit;
   dataset_provenance: string;
   tenant_id: string;
   requested_by: string;
@@ -212,6 +221,7 @@ export interface PromptExperiment {
   unchanged_cases: string[];
   results: PromptCaseResult[];
   recommendation: string;
+  promotion_status: "reject" | "iterate" | "validate_holdout" | "validate_regression" | "human_review";
   production_mutation: false;
 }
 
@@ -246,6 +256,8 @@ export interface EvaluationPlan {
   dataset: {
     dataset_id: string;
     version: string;
+    snapshot_id?: string;
+    selected_split?: DatasetSplit;
     provenance: string;
     case_count: number;
     safety_case_count: number;
@@ -270,6 +282,9 @@ export interface PilotRun {
   target_id: string;
   suite_id: string;
   dataset_id: string;
+  dataset_version?: string;
+  dataset_snapshot?: string;
+  dataset_split?: DatasetSplit;
   tenant_id: string;
   requested_by: string;
   app_id: string;
@@ -366,6 +381,9 @@ export interface StagePromptExperiment {
   requested_by: string;
   target_id: string;
   dataset_id: string;
+  dataset_version: string;
+  dataset_snapshot: string;
+  dataset_split: DatasetSplit;
   stage_id: string;
   stage_name: string;
   baseline_prompt: string;
@@ -380,5 +398,6 @@ export interface StagePromptExperiment {
   regressed_cases: string[];
   results: StageExperimentCaseResult[];
   recommendation: string;
+  promotion_status: "reject" | "iterate" | "validate_holdout" | "validate_regression" | "human_review";
   production_mutation: false;
 }

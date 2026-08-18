@@ -1,5 +1,5 @@
 const SESSION_KEY = "agent-evaluation-session";
-const state = { session: null, workspaces: [], workspace: null, stages: [], stage: null, experiments: [] };
+const state = { session: null, workspaces: [], workspace: null, stages: [], stage: null, experiments: [], dataset: null };
 const $ = (selector) => document.querySelector(selector);
 const h = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`;
@@ -76,6 +76,14 @@ function renderChain() {
   $("#evaluationChain").innerHTML = stages.map((stage, index) => `<button class="chain-stage ${stage.prompt_editable ? "editable" : "locked"} ${state.stage?.stage_id === stage.stage_id ? "active" : ""}" data-stage="${h(stage.stage_id)}"><i>0${index + 1}</i><span>${stage.prompt_editable ? "PROMPT" : "LOCKED"}</span><b>${h(stage.name)}</b><small>${h(stage.owner)}</small></button>`).join("");
 }
 
+function renderSplitOptions() {
+  const select = $("#stageDatasetSplit");
+  const current = select.value || "development";
+  const labels = { development: "Development · 可调试", holdout: "Holdout · 问题盲测", regression: "Regression · 发布门禁" };
+  const summary = state.dataset?.split_summary || {};
+  select.innerHTML = Object.entries(labels).map(([split, label]) => `<option value="${split}" ${split === current ? "selected" : ""}>${label} · ${Number(summary[split]?.actual_case_count || 0)} 条</option>`).join("");
+}
+
 function selectStage(stageID) {
   state.stage = state.stages.find((item) => item.stage_id === stageID) || null;
   renderChain();
@@ -94,26 +102,27 @@ function renderStageResult(experiment) {
   if (!experiment) return;
   const delta = experiment.delta.agreement;
   const cases = experiment.results.map((item) => `<article class="stage-case ${item.outcome}"><header><code>${h(item.case_id)}</code><b>${item.outcome === "improved" ? "改善" : item.outcome === "regressed" ? "退化" : "未变化"}</b><span>Oracle ${item.oracle_pass ? "PASS" : "FAIL"}</span></header><p>${h(item.query)}</p><div><section><small>BASELINE · ${item.baseline.pass ? "PASS" : "FAIL"}</small><b>${pct(item.baseline.score)}</b><p>${h(item.baseline.rationale)}</p></section><section><small>CANDIDATE · ${item.candidate.pass ? "PASS" : "FAIL"}</small><b>${pct(item.candidate.score)}</b><p>${h(item.candidate.rationale)}</p></section></div></article>`).join("");
-  $("#stageResult").innerHTML = `<div class="stage-score-grid"><article><small>BASELINE AGREEMENT</small><b>${pct(experiment.baseline.agreement)}</b><span>误放 ${experiment.baseline.false_accepts} · 误拒 ${experiment.baseline.false_rejects}</span></article><article class="candidate"><small>CANDIDATE AGREEMENT</small><b>${pct(experiment.candidate.agreement)}</b><span>误放 ${experiment.candidate.false_accepts} · 误拒 ${experiment.candidate.false_rejects}</span></article><article class="delta"><small>AGREEMENT DELTA</small><b>${delta >= 0 ? "+" : ""}${Math.round(delta * 1000) / 10}pp</b><span>改善 ${experiment.improved_cases.length} · 退化 ${experiment.regressed_cases.length}</span></article></div><div class="stage-recommendation">${h(experiment.recommendation)}</div><div class="stage-cases">${cases}</div>`;
+  $("#stageResult").innerHTML = `<div class="stage-snapshot"><span>${h(experiment.dataset_split || "legacy")}</span><span>${h(experiment.dataset_id)} @ ${h(experiment.dataset_version || "legacy")}</span><span>${h(String(experiment.dataset_snapshot || "").slice(0, 20))}</span><span class="promotion">${h(experiment.promotion_status || "legacy")}</span></div><div class="stage-score-grid"><article><small>BASELINE AGREEMENT</small><b>${pct(experiment.baseline.agreement)}</b><span>误放 ${experiment.baseline.false_accepts} · 误拒 ${experiment.baseline.false_rejects}</span></article><article class="candidate"><small>CANDIDATE AGREEMENT</small><b>${pct(experiment.candidate.agreement)}</b><span>误放 ${experiment.candidate.false_accepts} · 误拒 ${experiment.candidate.false_rejects}</span></article><article class="delta"><small>AGREEMENT DELTA</small><b>${delta >= 0 ? "+" : ""}${Math.round(delta * 1000) / 10}pp</b><span>改善 ${experiment.improved_cases.length} · 退化 ${experiment.regressed_cases.length}</span></article></div><div class="stage-recommendation">${h(experiment.recommendation)}</div><div class="stage-cases">${cases}</div>`;
 }
 
 function renderHistory() {
   const items = state.experiments.filter((item) => !state.workspace || item.workspace_id === state.workspace.workspace_id);
-  $("#stageHistory").innerHTML = items.length ? items.map((item) => `<button data-experiment="${h(item.stage_experiment_id)}"><div><code>${h(item.stage_experiment_id)}</code><b>${h(item.stage_name)}</b></div><span>${pct(item.baseline.agreement)} → ${pct(item.candidate.agreement)}</span><time>${new Date(item.started_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time></button>`).join("") : `<div class="studio-empty">当前项目暂无阶段实验。</div>`;
+  $("#stageHistory").innerHTML = items.length ? items.map((item) => `<button data-experiment="${h(item.stage_experiment_id)}"><div><code>${h(item.stage_experiment_id)}</code><b>${h(item.stage_name)} · ${h(item.dataset_split || "legacy")}</b></div><span>${pct(item.baseline.agreement)} → ${pct(item.candidate.agreement)}</span><time>${new Date(item.started_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time></button>`).join("") : `<div class="studio-empty">当前项目暂无阶段实验。</div>`;
 }
 
 function renderWorkspace() {
-  renderWorkspaceSelect(); renderChat(); renderBrief(); renderChain(); renderHistory();
+  renderWorkspaceSelect(); renderChat(); renderBrief(); renderChain(); renderHistory(); renderSplitOptions();
   if (!state.stage) selectStage(state.workspace?.brief?.recommended_stage_id || "retrieval_judge");
 }
 
 async function loadStudio() {
-  const [stagePayload, workspacePayload, experimentPayload] = await Promise.all([
-    api("/api/v1/studio/stages"), api("/api/v1/project-workspaces"), api("/api/v1/stage-experiments"),
+  const [stagePayload, workspacePayload, experimentPayload, datasetPayload] = await Promise.all([
+    api("/api/v1/studio/stages"), api("/api/v1/project-workspaces"), api("/api/v1/stage-experiments"), api("/api/v1/datasets/production-sample"),
   ]);
   state.stages = stagePayload.stages || [];
   state.workspaces = workspacePayload.workspaces || [];
   state.experiments = experimentPayload.experiments || [];
+  state.dataset = datasetPayload;
   state.workspace = state.workspaces[0] || null;
   if (!state.workspace) await createWorkspace(true);
   else renderWorkspace();
@@ -154,7 +163,7 @@ async function runStageExperiment() {
   if (!prompt) { toast("Candidate Prompt 不能为空"); return; }
   const button = $("#runStageExperiment"); button.disabled = true; button.textContent = "回放 + 双 Judge 运行中…";
   try {
-    const experiment = await api(`/api/v1/project-workspaces/${encodeURIComponent(state.workspace.workspace_id)}/stage-experiments`, { method: "POST", body: JSON.stringify({ stage_id: state.stage.stage_id, candidate_prompt: prompt, case_limit: Number($("#stageCaseLimit").value) }) });
+    const experiment = await api(`/api/v1/project-workspaces/${encodeURIComponent(state.workspace.workspace_id)}/stage-experiments`, { method: "POST", body: JSON.stringify({ stage_id: state.stage.stage_id, candidate_prompt: prompt, dataset_split: $("#stageDatasetSplit").value, case_limit: Number($("#stageCaseLimit").value) }) });
     state.experiments.unshift(experiment); renderStageResult(experiment); renderHistory(); toast("阶段 Prompt 对照完成，未修改目标 Agent。" );
   } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.textContent = "运行阶段对照"; }
@@ -181,7 +190,7 @@ $("#chatForm").addEventListener("submit", (event) => { event.preventDefault(); s
 $("#starterPrompts").addEventListener("click", (event) => { const button = event.target.closest("[data-message]"); if (button) sendMessage(button.dataset.message); });
 $("#evaluationChain").addEventListener("click", (event) => { const button = event.target.closest("[data-stage]"); if (button) selectStage(button.dataset.stage); });
 $("#runStageExperiment").addEventListener("click", runStageExperiment);
-$("#stageHistory").addEventListener("click", (event) => { const button = event.target.closest("[data-experiment]"); const item = state.experiments.find((experiment) => experiment.stage_experiment_id === button?.dataset.experiment); if (item) { selectStage(item.stage_id); $("#stageCandidate").value = item.candidate_prompt; renderStageResult(item); $("#promptLab").scrollIntoView({ behavior: "smooth" }); } });
+$("#stageHistory").addEventListener("click", (event) => { const button = event.target.closest("[data-experiment]"); const item = state.experiments.find((experiment) => experiment.stage_experiment_id === button?.dataset.experiment); if (item) { selectStage(item.stage_id); $("#stageCandidate").value = item.candidate_prompt; $("#stageDatasetSplit").value = item.dataset_split || "development"; renderStageResult(item); $("#promptLab").scrollIntoView({ behavior: "smooth" }); } });
 
 await checkHealth();
 try {

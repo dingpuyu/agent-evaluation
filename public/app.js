@@ -36,7 +36,7 @@ function renderSummary() {
   $("#summaryGrid").innerHTML = `
     <article><small>评测目标</small><b>${h(target?.name || "—")}</b><span>${h(target?.type || "未连接")}</span></article>
     <article><small>评测套件</small><b>${suites.length}</b><span>RAG 诊断 + Prompt A/B</span></article>
-    <article><small>生产型样本</small><b>${dataset?.cases?.length ?? "—"}</b><span>${h(dataset?.provenance || "等待加载")}</span></article>
+    <article><small>生产型样本</small><b>${dataset?.cases?.length ?? "—"}</b><span>Development / Holdout / Regression</span></article>
     <article><small>Judge / Harness</small><b>Pi + Rules</b><span>模型辅助 + 确定性门禁</span></article>`;
 }
 
@@ -48,7 +48,7 @@ function renderPlan() {
   $("#planTarget").textContent = plan.target_id;
   $("#planEnvironment").textContent = `${plan.app_id} · ${plan.environment_id}`;
   $("#planDataset").textContent = `${plan.dataset.dataset_id} @ ${plan.dataset.version}`;
-  $("#planProvenance").textContent = `${plan.dataset.case_count} cases · ${plan.dataset.safety_case_count} safety · ${plan.dataset.provenance}`;
+  $("#planProvenance").textContent = `${plan.dataset.selected_split || "all"} · ${plan.dataset.case_count} cases · ${plan.dataset.safety_case_count} safety`;
   $("#planExecution").textContent = `${plan.workflow.length} nodes · ${plan.execution_order.length} stages`;
   $("#planGates").innerHTML = plan.gates.map((gate) => `<span>${h(gate.metric)} ≥ ${gate.threshold} ${gate.hard ? "· HARD" : "· QUALITY"}</span>`).join("");
 }
@@ -113,8 +113,11 @@ function renderDataset() {
   const dataset = state.dataset;
   if (!dataset) return;
   $("#datasetDescription").textContent = dataset.description;
-  $("#datasetMeta").textContent = `${dataset.dataset_id} · ${dataset.version}`;
-  $("#datasetTable").innerHTML = `<div class="dataset-row head"><span>Case</span><span>业务分群</span><span>线上问题形态</span><span>期望决策</span></div>` + dataset.cases.map((item) => `<div class="dataset-row"><code>${h(item.id)}</code><span>${h(item.segment)}</span><span>${h(item.query)}</span><i class="${h(item.expected_decision)}">${h(item.expected_decision)}</i></div>`).join("");
+  $("#datasetMeta").textContent = `${dataset.dataset_id} · ${dataset.version} · ${h(String(dataset.snapshot_id || "").slice(0, 18))}`;
+  const splitNames = { development: "Development", holdout: "Holdout", regression: "Regression" };
+  const splitSummary = dataset.split_summary || {};
+  $("#datasetSplits").innerHTML = Object.entries(splitSummary).map(([split, value]) => `<article class="${h(split)}"><small>${h(splitNames[split] || split)}</small><b>${Number(value.actual_case_count || value.case_count || 0)} 条</b><span>${h(value.purpose)}${value.prompt_visible ? "" : " · 运行前盲化"}</span></article>`).join("");
+  $("#datasetTable").innerHTML = `<div class="dataset-row head"><span>Case</span><span>Split</span><span>业务分群</span><span>线上问题形态</span><span>期望决策</span></div>` + dataset.cases.map((item) => `<div class="dataset-row ${item.hidden ? "blind" : ""}"><code>${h(item.id)}</code><span class="split">${h(item.split)}</span><span>${h(item.segment)}</span><span>${h(item.query)}</span><i class="${h(item.expected_decision)}">${h(item.expected_decision)}</i></div>`).join("");
 }
 
 function renderBadCases() {
@@ -144,14 +147,15 @@ function renderExperiment(experiment) {
     const checks = (values = {}) => Object.entries(values).map(([name, ok]) => `${name}:${ok ? "✓" : "×"}`).join(" · ");
     return `<article class="comparison-case ${outcome}"><header><code>${h(caseID)}</code><b>${outcome === "improved" ? "改善" : outcome === "regressed" ? "退化" : "未变化"}</b></header><p>${h(baseline.query || candidate.query || "")}</p><div><section><small>BASELINE · ${baseline.passed ? "PASS" : "FAIL"}</small><p>${h(baseline.answer || "—")}</p><i>${h(checks(baseline.checks))}</i></section><section><small>CANDIDATE · ${candidate.passed ? "PASS" : "FAIL"}</small><p>${h(candidate.answer || "—")}</p><i>${h(checks(candidate.checks))}</i></section></div></article>`;
   }).join("");
-  $("#experimentResult").innerHTML = `<div class="comparison"><div class="comparison-top"><div class="score-card"><small>BASELINE PASS RATE</small><b>${pct(experiment.baseline.pass_rate)}</b><span>安全 ${pct(experiment.baseline.safety_pass_rate)} · ${Math.round(experiment.baseline.average_latency_ms)}ms</span></div><div class="score-card candidate"><small>CANDIDATE PASS RATE</small><b>${pct(experiment.candidate.pass_rate)}</b><span>安全 ${pct(experiment.candidate.safety_pass_rate)} · ${Math.round(experiment.candidate.average_latency_ms)}ms</span></div><div class="score-card delta"><small>QUALITY DELTA</small><b>${delta.pass_rate >= 0 ? "+" : ""}${pct(delta.pass_rate)}</b><span>引用 ${delta.citation_compliance >= 0 ? "+" : ""}${pct(delta.citation_compliance)} · 延迟 ${Math.round(delta.average_latency_ms)}ms</span></div></div><div class="recommendation">${h(experiment.recommendation)}</div><div class="case-delta"><div><b>改善 ${experiment.improved_cases.length}</b><span>${h(experiment.improved_cases.join("、") || "无")}</span></div><div><b>退化 ${experiment.regressed_cases.length}</b><span>${h(experiment.regressed_cases.join("、") || "无")}</span></div><div><b>未变化 ${experiment.unchanged_cases.length}</b><span>${h(experiment.unchanged_cases.join("、") || "无")}</span></div></div><div class="comparison-cases">${cases}</div></div>`;
+  $("#experimentResult").innerHTML = `<div class="comparison"><div class="experiment-snapshot"><span>${h(experiment.dataset_split || "legacy")}</span><span>${h(experiment.dataset_id)} @ ${h(experiment.dataset_version || "legacy")}</span><span>${h(String(experiment.dataset_snapshot || "").slice(0, 20))}</span></div><div class="comparison-top"><div class="score-card"><small>BASELINE PASS RATE</small><b>${pct(experiment.baseline.pass_rate)}</b><span>安全 ${pct(experiment.baseline.safety_pass_rate)} · ${Math.round(experiment.baseline.average_latency_ms)}ms</span></div><div class="score-card candidate"><small>CANDIDATE PASS RATE</small><b>${pct(experiment.candidate.pass_rate)}</b><span>安全 ${pct(experiment.candidate.safety_pass_rate)} · ${Math.round(experiment.candidate.average_latency_ms)}ms</span></div><div class="score-card delta"><small>QUALITY DELTA</small><b>${delta.pass_rate >= 0 ? "+" : ""}${pct(delta.pass_rate)}</b><span>引用 ${delta.citation_compliance >= 0 ? "+" : ""}${pct(delta.citation_compliance)} · 延迟 ${Math.round(delta.average_latency_ms)}ms</span></div></div><div class="recommendation">${h(experiment.recommendation)}</div><div class="case-delta"><div><b>改善 ${experiment.improved_cases.length}</b><span>${h(experiment.improved_cases.join("、") || "无")}</span></div><div><b>退化 ${experiment.regressed_cases.length}</b><span>${h(experiment.regressed_cases.join("、") || "无")}</span></div><div><b>未变化 ${experiment.unchanged_cases.length}</b><span>${h(experiment.unchanged_cases.join("、") || "无")}</span></div></div><div class="comparison-cases">${cases}</div></div>`;
+  $("#experimentResult .experiment-snapshot").insertAdjacentHTML("beforeend", `<span>${h(experiment.promotion_status || "legacy")}</span>`);
 }
 
 function renderHistory() {
   const items = [
     ...state.pilots.map((item) => ({ id: item.pilot_run_id, kind: "Platform Pilot", status: item.status, time: item.started_at, result: item.status === "completed" ? `${item.gate_passed ? "GATE PASS" : "GATE FAIL"} · ${item.cases_completed}/${item.total_cases}` : `${item.cases_completed}/${item.total_cases}` })),
     ...state.runs.map((item) => ({ id: item.run_id, kind: "RAG Bad Case", status: item.status, time: item.started_at, result: item.report?.root_cause || "—" })),
-    ...state.experiments.map((item) => ({ id: item.experiment_id, kind: "Prompt A/B", status: item.status, time: item.started_at, result: `${pct(item.baseline.pass_rate)} → ${pct(item.candidate.pass_rate)}` })),
+    ...state.experiments.map((item) => ({ id: item.experiment_id, kind: `Prompt A/B · ${item.dataset_split || "legacy"}`, status: item.status, time: item.started_at, result: `${pct(item.baseline.pass_rate)} → ${pct(item.candidate.pass_rate)}` })),
   ].sort((a, b) => String(b.time).localeCompare(String(a.time)));
   $("#historyList").innerHTML = items.length ? items.map((item) => `<div class="history-row"><code>${h(item.id)}</code><b>${h(item.kind)}</b><span>${h(item.status)} · ${h(item.result)}</span><time>${new Date(item.time).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time></div>`).join("") : `<div class="empty">尚无运行记录</div>`;
 }
@@ -192,7 +196,7 @@ function logout() { localStorage.removeItem(SESSION_KEY); state.session = null; 
 async function runExperiment() {
   const button = $("#runExperiment"); const previous = button.textContent; button.disabled = true; button.textContent = "Baseline / Candidate 运行中…";
   try {
-    const experiment = await api("/api/v1/experiments/prompt-comparisons", { method: "POST", body: JSON.stringify({ prompt_overlay: $("#candidatePrompt").value, case_limit: Number($("#caseLimit").value) }) });
+    const experiment = await api("/api/v1/experiments/prompt-comparisons", { method: "POST", body: JSON.stringify({ prompt_overlay: $("#candidatePrompt").value, dataset_split: $("#experimentSplit").value, case_limit: Number($("#caseLimit").value) }) });
     state.experiments.unshift(experiment); renderExperiment(experiment); renderHistory(); toast("Prompt 对照评测完成，未修改生产配置。");
   } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.textContent = previous; }

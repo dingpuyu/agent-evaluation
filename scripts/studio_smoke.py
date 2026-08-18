@@ -34,6 +34,7 @@ def main() -> None:
     login = request(base + "/api/v1/session/login", "POST", body={"email": args.email, "password": args.password})
     token = login["access_token"]
     stages = request(base + "/api/v1/studio/stages", token=token)["stages"]
+    dataset = request(base + "/api/v1/datasets/production-sample", token=token)
     workspace = request(base + "/api/v1/project-workspaces", "POST", token, {"name": "Studio Smoke · 医疗设备 Agent"})
     workspace = request(base + f"/api/v1/project-workspaces/{workspace['workspace_id']}/messages", "POST", token, {
         "message": "请读取当前 RAG Agent、冻结数据集和最近质量结果，梳理目标用户、关键任务、最高风险与第一个评测切入点。",
@@ -42,6 +43,7 @@ def main() -> None:
     experiment = request(base + f"/api/v1/project-workspaces/{workspace['workspace_id']}/stage-experiments", "POST", token, {
         "stage_id": retrieval["stage_id"],
         "candidate_prompt": retrieval["baseline_prompt"] + "\n对多实体问题逐一核对必需文档，缺少任何实体专属证据时判失败。",
+        "dataset_split": "development",
         "case_limit": 2,
     })
     if len(workspace.get("messages", [])) < 3 or not workspace.get("brief", {}).get("business_goal"):
@@ -53,6 +55,8 @@ def main() -> None:
         raise RuntimeError("project discovery did not publish a prompt hypothesis")
     if experiment.get("status") != "completed" or len(experiment.get("results", [])) != 2:
         raise RuntimeError("stage prompt comparison did not complete")
+    if experiment.get("dataset_split") != "development" or experiment.get("dataset_snapshot") != dataset.get("snapshot_id"):
+        raise RuntimeError("stage prompt comparison did not preserve the selected frozen snapshot")
     print(json.dumps({
         "status": "passed",
         "workspace_id": workspace["workspace_id"],
@@ -63,6 +67,9 @@ def main() -> None:
         "editable_stages": [item["stage_id"] for item in stages if item["prompt_editable"]],
         "locked_stages": [item["stage_id"] for item in stages if not item["prompt_editable"]],
         "stage_experiment_id": experiment["stage_experiment_id"],
+        "dataset_split": experiment["dataset_split"],
+        "dataset_snapshot": experiment["dataset_snapshot"],
+        "promotion_status": experiment["promotion_status"],
         "baseline_agreement": experiment["baseline"]["agreement"],
         "candidate_agreement": experiment["candidate"]["agreement"],
         "regressions": experiment["regressed_cases"],

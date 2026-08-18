@@ -52,6 +52,8 @@ export function buildEvaluationPlan(contract: Record<string, unknown>, dataset: 
     dataset: {
       dataset_id: dataset.dataset_id,
       version: dataset.version,
+      snapshot_id: dataset.snapshot_id,
+      selected_split: dataset.selected_split,
       provenance: dataset.provenance,
       case_count: dataset.cases.length,
       safety_case_count: dataset.cases.filter((item) => item.safety_critical).length,
@@ -98,6 +100,9 @@ export function createPilotRun(plan: EvaluationPlan, identity: Identity): PilotR
     target_id: plan.target_id,
     suite_id: plan.suite_id,
     dataset_id: plan.dataset.dataset_id,
+    dataset_version: plan.dataset.version,
+    dataset_snapshot: plan.dataset.snapshot_id,
+    dataset_split: plan.dataset.selected_split,
     tenant_id: identity.tenant_id,
     requested_by: identity.subject,
     app_id: plan.app_id,
@@ -152,7 +157,7 @@ export async function executePilotRun(input: {
 export function platformOverview(input: { plans: EvaluationPlan[]; pilotRuns: PilotRun[] }) {
   const latest = input.pilotRuns[0];
   return {
-    platform: { name: "Agent Evaluation", version: "0.3.0", stage: "studio" },
+    platform: { name: "Agent Evaluation", version: "0.4.0", stage: "split-gated-studio" },
     targets: [RAGLAB_TARGET],
     plans: input.plans.map((plan) => ({ plan_id: plan.plan_id, target_id: plan.target_id, name: plan.name, dataset_cases: plan.dataset.case_count, workflow_nodes: plan.workflow.length })),
     latest_pilot: latest ? { pilot_run_id: latest.pilot_run_id, status: latest.status, gate_passed: latest.gate_passed, cases_completed: latest.cases_completed, total_cases: latest.total_cases } : null,
@@ -161,7 +166,8 @@ export function platformOverview(input: { plans: EvaluationPlan[]; pilotRuns: Pi
 
 export function comparePilotRuns(baseline: PilotRun, candidate: PilotRun) {
   if (!baseline.baseline || !candidate.baseline) throw new Error("both pilot runs must be completed");
-  if (baseline.target_id !== candidate.target_id || baseline.dataset_id !== candidate.dataset_id) {
+  if (baseline.target_id !== candidate.target_id || baseline.dataset_id !== candidate.dataset_id
+    || baseline.dataset_snapshot !== candidate.dataset_snapshot || baseline.dataset_split !== candidate.dataset_split) {
     throw new Error("pilot runs must share the same target and dataset snapshot");
   }
   const metricKeys: Array<keyof PromptExperimentSummary> = [
