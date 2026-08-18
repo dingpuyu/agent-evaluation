@@ -1,6 +1,11 @@
-.PHONY: install build test up down status smoke studio-smoke split-smoke pilot import-production
+.PHONY: install build test deploy-test deploy-init deploy-check deploy-up deploy-verify deploy-status deploy-down up down status smoke studio-smoke split-smoke pilot import-production
 
-DOCKER_COMPOSE ?= docker-compose
+DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then echo 'docker-compose'; else echo 'docker compose'; fi)
+EVALUATION_ENV_FILE ?= .env
+RAGLAB_DEPLOY_ENV ?= ../rag-evolution-lab/.env
+COMPOSE_ENV_FILE = $(if $(wildcard $(EVALUATION_ENV_FILE)),--env-file $(EVALUATION_ENV_FILE),)
+COMPOSE = $(DOCKER_COMPOSE) $(COMPOSE_ENV_FILE)
+WITH_ENV = EVALUATION_ENV_FILE=$(EVALUATION_ENV_FILE) ./scripts/run_with_env.sh
 
 install:
 	npm ci
@@ -11,27 +16,51 @@ build:
 test:
 	npm test
 
+deploy-test:
+	python3 -m unittest discover -s scripts/tests -p 'test_deploy_init.py'
+
+deploy-init:
+	python3 scripts/deploy_init.py --raglab-env $(RAGLAB_DEPLOY_ENV) --output $(EVALUATION_ENV_FILE) --host $${DEPLOY_HOST:-localhost}
+
+deploy-check:
+	$(WITH_ENV) ./scripts/deploy_preflight.sh
+
+deploy-up: deploy-check
+	$(WITH_ENV) $(COMPOSE) up -d --build
+
+deploy-verify:
+	$(WITH_ENV) python3 scripts/bootstrap_target.py
+	$(WITH_ENV) python3 scripts/smoke.py
+	$(WITH_ENV) python3 scripts/studio_smoke.py
+	$(WITH_ENV) python3 scripts/split_smoke.py
+
+deploy-status:
+	$(WITH_ENV) $(COMPOSE) ps
+
+deploy-down:
+	$(WITH_ENV) $(COMPOSE) down
+
 up:
-	@DEEPSEEK_API_KEY="$${DEEPSEEK_API_KEY:-$$(launchctl getenv DEEPSEEK_API_KEY 2>/dev/null)}" $(DOCKER_COMPOSE) up -d --build
+	@$(WITH_ENV) $(COMPOSE) up -d --build
 
 down:
-	$(DOCKER_COMPOSE) down
+	$(WITH_ENV) $(COMPOSE) down
 
 status:
-	$(DOCKER_COMPOSE) ps
+	$(WITH_ENV) $(COMPOSE) ps
 	@curl --fail --silent http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}/healthz && echo
 
 smoke:
-	python3 scripts/smoke.py --evaluation http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}
+	$(WITH_ENV) python3 scripts/smoke.py
 
 studio-smoke:
-	python3 scripts/studio_smoke.py --evaluation http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}
+	$(WITH_ENV) python3 scripts/studio_smoke.py
 
 split-smoke:
-	python3 scripts/split_smoke.py --evaluation http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}
+	$(WITH_ENV) python3 scripts/split_smoke.py
 
 pilot:
-	python3 scripts/pilot.py --evaluation http://127.0.0.1:$${AGENT_EVALUATION_PORT:-18200}
+	$(WITH_ENV) python3 scripts/pilot.py
 
 import-production:
 	@test -n "$${INPUT}" || (echo "INPUT=/authorized/export.jsonl is required" && exit 1)

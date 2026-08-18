@@ -26,7 +26,7 @@ def request(url: str, method: str = "GET", token: str = "", body: dict | None = 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--evaluation", default="http://127.0.0.1:18200")
+    parser.add_argument("--evaluation", default=os.getenv("AGENT_EVALUATION_URL", "http://127.0.0.1:18200"))
     parser.add_argument("--email", default=os.getenv("AGENT_EVALUATION_EMAIL", "alice@tenant-a.local"))
     parser.add_argument("--password", default=os.getenv("AGENT_EVALUATION_PASSWORD", "RagLab-Alice-2026!"))
     args = parser.parse_args()

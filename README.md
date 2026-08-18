@@ -36,6 +36,18 @@ make status
 
 默认复用 `DEEPSEEK_API_KEY`。Key 只注入容器，不写入运行记录、数据集或仓库。
 
+### 在新电脑与 RAG 平台一起部署
+
+先在同级目录的 `rag-evolution-lab` 执行 `make deploy-init、deploy-up、deploy-bootstrap、deploy-verify`，再在本仓库执行：
+
+```bash
+make deploy-init
+make deploy-up
+make deploy-verify
+```
+
+初始化器会读取 `../rag-evolution-lab/.env`，自动对齐实际端口和随机 Tenant A 密码；自己的 `.env` 与 `.deploy/credentials.txt` 权限均为 `0600`。评测模型 Key 仍只从当前进程环境注入。完整说明见 RAG 仓库的 `docs/portable-deployment.md`。
+
 真实端到端验证：
 
 ```bash

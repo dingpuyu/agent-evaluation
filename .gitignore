@@ -8,3 +8,4 @@ coverage/
 data/runs/*.json
 data/runs/*.tmp
 *.log
+.deploy/
