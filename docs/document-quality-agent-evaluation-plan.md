@@ -324,9 +324,9 @@ DELETE /api/v1/evaluation-sandboxes/{id}
 1. 用当前 Paddle 轻量配置跑 Baseline。
 2. 固化 `BeneHeart C2 / BAT-LOW-021 / 授权服务人员` 字段 Golden。
 3. 加入重复页眉页脚和表格 Fixture，验证 Cleaner 不误删正文。
-4. 固定 OCR/Cleaner，比较 `700/80` 与 `600/80`。
+4. 固定 OCR/Cleaner，先比较 `400/100` Baseline 与 `700/80` Candidate；首轮实际结果为 3/4 → 4/4，随后冻结 Candidate 进入 Holdout/Regression。
 5. 观察 Answer Span、Embedding 放大、Top-K 重复占用、Hit@5 和 MRR。
 6. 让 Agent 读取失败 Case，只提出一个 Candidate并说明为何不是 Prompt 问题。
 7. Candidate 仅在 Development 有收益时进入 Holdout；Regression 中关键字段或安全门禁任何一项失败都拒绝晋级。
 
-这条首轮链路规模小，但能够真实证明：评测 Agent 不是“自动写评语”，而是在确定性质量基座上定位问题、控制变量、执行实验并给出可审计的优化方向。
+这条首轮链路已经完成，实际证据见 [Phase B 真实流水线报告](document-quality-phase-b-report.md)。规模虽小，但能够真实证明：评测平台不是“自动写评语”，而是在确定性质量基座上定位问题、控制变量、执行实验并给出可审计的优化方向；质量工程 Agent 仍需在下一阶段接入这些受限工具。

@@ -81,6 +81,7 @@ export interface DocumentRetrievalArtifact {
 export interface DocumentPipelineArtifact {
   schema: "agent-evaluation.document-quality.artifact.v1";
   case_id: string;
+  dataset_id?: string;
   status: "ready" | "review_required" | "ocr_required";
   indexed: boolean;
   config_fingerprint: string;
@@ -143,6 +144,7 @@ export interface DocumentQualityReport {
   dataset_version: string;
   dataset_snapshot: string;
   split: DatasetSplit | "all";
+  evaluated_layers: DocumentFailureLayer[];
   generated_at: string;
   config_fingerprints: string[];
   cases_total: number;
@@ -155,12 +157,31 @@ export interface DocumentQualityReport {
   results: DocumentQualityCaseResult[];
 }
 
+export interface DocumentQualityComparison {
+  schema: "agent-evaluation.document-quality.comparison.v1";
+  dataset_snapshot: string;
+  split: DatasetSplit | "all";
+  evaluated_layers: DocumentFailureLayer[];
+  baseline: { gate_passed: boolean; cases_passed: number; cases_total: number; config_fingerprints: string[] };
+  candidate: { gate_passed: boolean; cases_passed: number; cases_total: number; config_fingerprints: string[] };
+  metric_deltas: Array<{ name: string; baseline: number; candidate: number; delta: number; improved: boolean; regressed: boolean }>;
+  fixed_cases: string[];
+  regressed_cases: string[];
+  regressed_metrics: string[];
+  promotable: boolean;
+  recommendation: string;
+}
+
 function ratio(numerator: number, denominator: number): number {
   return denominator ? numerator / denominator : 1;
 }
 
 function normalizeForCER(value: string): string {
   return value.normalize("NFC").replace(/\s+/gu, "").toLocaleLowerCase("zh-CN");
+}
+
+function containsIgnoringWhitespace(value: string, expected: string): boolean {
+  return value.replace(/\s+/gu, "").includes(expected.replace(/\s+/gu, ""));
 }
 
 export function characterErrorRate(expected: string, actual: string): number {
@@ -208,72 +229,83 @@ function embeddingAmplification(chunks: DocumentChunkArtifact[]): number | undef
   return chunks.reduce((sum, item) => sum + [...item.content].length, 0) / parentRunes;
 }
 
-export function evaluateDocumentCase(item: DocumentQualityCase, artifact: DocumentPipelineArtifact): DocumentQualityCaseResult {
+export function evaluateDocumentCase(
+  item: DocumentQualityCase,
+  artifact: DocumentPipelineArtifact,
+  enabledLayers: readonly DocumentFailureLayer[] = DOCUMENT_FAILURE_LAYERS,
+): DocumentQualityCaseResult {
   if (artifact.case_id !== item.case_id) throw new Error(`artifact case mismatch: expected ${item.case_id}, got ${artifact.case_id}`);
+  const enabled = new Set(enabledLayers);
   const checks: DocumentQualityCheck[] = [];
   const documentText = artifact.blocks.map((block) => block.text).join("\n");
   const removedText = artifact.cleaning.removed_blocks.map((block) => block.text).join("\n");
   const measurements: CaseMeasurements = {
-    critical_total: item.critical_fields?.length ?? 0,
+    critical_total: enabled.has("ocr") ? item.critical_fields?.length ?? 0 : 0,
     critical_matched: 0,
-    protected_total: item.protected_text?.length ?? 0,
+    protected_total: enabled.has("cleaning") ? item.protected_text?.length ?? 0 : 0,
     protected_preserved: 0,
-    noise_total: item.expected_removed_noise?.length ?? 0,
+    noise_total: enabled.has("cleaning") ? item.expected_removed_noise?.length ?? 0 : 0,
     noise_removed: 0,
-    spans_total: item.required_chunk_spans?.length ?? 0,
+    spans_total: enabled.has("chunk") ? item.required_chunk_spans?.length ?? 0 : 0,
     spans_contained: 0,
-    retrieval_total: item.retrieval_queries?.length ?? 0,
+    retrieval_total: enabled.has("retrieval") ? item.retrieval_queries?.length ?? 0 : 0,
     retrieval_hits: 0,
     reciprocal_rank_sum: 0,
     wrong_document_count: 0,
-    unsafe_publish_count: artifact.status !== "ready" && artifact.indexed ? 1 : 0,
-    embedding_amplification: embeddingAmplification(artifact.chunks),
+    unsafe_publish_count: enabled.has("safety") && artifact.status !== "ready" && artifact.indexed ? 1 : 0,
+    embedding_amplification: enabled.has("chunk") ? embeddingAmplification(artifact.chunks) : undefined,
   };
 
-  checks.push(check({
-    name: "expected_status", layer: "safety", hard: true,
-    passed: artifact.status === item.expected_status, expected: item.expected_status, actual: artifact.status,
-  }));
-  checks.push(check({
-    name: "non_ready_not_indexed", layer: "safety", hard: true,
-    passed: measurements.unsafe_publish_count === 0, expected: 0, actual: measurements.unsafe_publish_count,
-  }));
+  if (enabled.has("safety")) {
+    checks.push(check({
+      name: "expected_status", layer: "safety", hard: true,
+      passed: artifact.status === item.expected_status, expected: item.expected_status, actual: artifact.status,
+    }));
+    checks.push(check({
+      name: "non_ready_not_indexed", layer: "safety", hard: true,
+      passed: measurements.unsafe_publish_count === 0, expected: 0, actual: measurements.unsafe_publish_count,
+    }));
+  }
 
-  for (const field of item.critical_fields ?? []) {
+  for (const field of enabled.has("ocr") ? item.critical_fields ?? [] : []) {
     const passed = documentText.includes(field);
     if (passed) measurements.critical_matched += 1;
     checks.push(check({ name: `critical_field:${field}`, layer: "ocr", hard: true, passed, expected: field, actual: passed ? field : "missing" }));
   }
-  for (const forbidden of item.forbidden_normalizations ?? []) {
+  for (const forbidden of enabled.has("ocr") ? item.forbidden_normalizations ?? [] : []) {
     const passed = !documentText.includes(forbidden);
     checks.push(check({ name: `forbidden_normalization:${forbidden}`, layer: "ocr", hard: true, passed, expected: "absent", actual: passed ? "absent" : "present" }));
   }
 
-  for (const expected of item.expected_blocks ?? []) {
+  for (const expected of enabled.has("layout") ? item.expected_blocks ?? [] : []) {
     const passed = artifact.blocks.some((block) => blockMatches(expected, block));
     checks.push(check({ name: `expected_block:${expected.text ?? expected.contains ?? expected.type ?? "block"}`, layer: "layout", hard: true, passed }));
   }
   let previousIndex = -1;
-  for (const marker of item.expected_reading_order ?? []) {
+  for (const marker of enabled.has("layout") ? item.expected_reading_order ?? [] : []) {
     const index = artifact.blocks.findIndex((block, blockIndex) => blockIndex > previousIndex && block.text.includes(marker));
     const passed = index > previousIndex;
     checks.push(check({ name: `reading_order:${marker}`, layer: "layout", hard: true, passed, expected: `after ${previousIndex}`, actual: index }));
     if (passed) previousIndex = index;
   }
 
-  for (const noise of item.expected_removed_noise ?? []) {
+  for (const noise of enabled.has("cleaning") ? item.expected_removed_noise ?? [] : []) {
     const passed = removedText.includes(noise) && !documentText.includes(noise);
     if (passed) measurements.noise_removed += 1;
     checks.push(check({ name: `removed_noise:${noise}`, layer: "cleaning", hard: true, passed }));
   }
-  for (const protectedValue of item.protected_text ?? []) {
+  for (const protectedValue of enabled.has("cleaning") ? item.protected_text ?? [] : []) {
     const passed = documentText.includes(protectedValue) && !removedText.includes(protectedValue);
     if (passed) measurements.protected_preserved += 1;
     checks.push(check({ name: `protected_text:${protectedValue}`, layer: "cleaning", hard: true, passed }));
   }
 
-  for (const span of item.required_chunk_spans ?? []) {
-    const passed = artifact.chunks.some((chunk) => chunk.content.includes(span));
+  for (const span of enabled.has("chunk") ? item.required_chunk_spans ?? [] : []) {
+    // Layout parsers and OCR engines may insert or remove presentation-only
+    // whitespace around CJK text. Chunk containment evaluates whether the
+    // answer unit stayed in one chunk; identifier exactness is enforced by the
+    // separate critical-field checks above.
+    const passed = artifact.chunks.some((chunk) => containsIgnoringWhitespace(chunk.content, span));
     if (passed) measurements.spans_contained += 1;
     checks.push(check({ name: `chunk_span:${span.slice(0, 40)}`, layer: "chunk", hard: true, passed }));
   }
@@ -284,7 +316,7 @@ export function evaluateDocumentCase(item: DocumentQualityCase, artifact: Docume
     }));
   }
 
-  for (const golden of item.retrieval_queries ?? []) {
+  for (const golden of enabled.has("retrieval") ? item.retrieval_queries ?? [] : []) {
     const actual = artifact.retrieval.find((entry) => entry.query_id === golden.query_id);
     const documentIDs = actual?.hits.map((hit) => hit.document_id) ?? [];
     const rankIndex = documentIDs.findIndex((documentID) => golden.required_document_ids.includes(documentID));
@@ -300,7 +332,7 @@ export function evaluateDocumentCase(item: DocumentQualityCase, artifact: Docume
     checks.push(check({ name: `retrieval_source_page:${golden.query_id}`, layer: "retrieval", hard: true, passed: pagesPassed }));
   }
 
-  if (item.expected_text !== undefined) {
+  if (enabled.has("ocr") && item.expected_text !== undefined) {
     measurements.character_error_rate = characterErrorRate(item.expected_text, documentText);
     checks.push(check({
       name: "character_error_rate", layer: "ocr", hard: true,
@@ -327,13 +359,14 @@ export function evaluateDocumentQuality(
   dataset: DocumentQualityDataset,
   artifacts: DocumentPipelineArtifact[],
   split: DatasetSplit | "all" = "all",
+  enabledLayers: readonly DocumentFailureLayer[] = DOCUMENT_FAILURE_LAYERS,
 ): DocumentQualityReport {
   const cases = dataset.cases.filter((item) => split === "all" || item.split === split);
   const artifactsByID = new Map(artifacts.map((artifact) => [artifact.case_id, artifact]));
   const results = cases.map((item) => {
     const artifact = artifactsByID.get(item.case_id);
     if (!artifact) throw new Error(`missing document artifact: ${item.case_id}`);
-    return evaluateDocumentCase(item, artifact);
+    return evaluateDocumentCase(item, artifact, enabledLayers);
   });
   const sums = results.reduce((total, item) => {
     for (const key of Object.keys(total) as Array<keyof typeof total>) total[key] += item.measurements[key] as number || 0;
@@ -346,18 +379,23 @@ export function evaluateDocumentQuality(
   });
   const cerValues = results.map((item) => item.measurements.character_error_rate).filter((value): value is number => value !== undefined);
   const amplificationValues = results.map((item) => item.measurements.embedding_amplification).filter((value): value is number => value !== undefined);
+  const enabled = new Set(enabledLayers);
   const metrics: DocumentQualityMetric[] = [
     gate("case_pass_rate", ratio(results.filter((item) => item.passed).length, results.length), ">=", 0.95, false),
     gate("hard_case_failure_count", results.filter((item) => !item.passed).length, "=", 0, true),
-    gate("critical_field_exact_match", ratio(sums.critical_matched, sums.critical_total), ">=", 1, true),
-    gate("protected_text_preservation", ratio(sums.protected_preserved, sums.protected_total), ">=", 1, true),
-    gate("expected_noise_removal", ratio(sums.noise_removed, sums.noise_total), ">=", 0.95, true),
-    gate("answer_span_containment", ratio(sums.spans_contained, sums.spans_total), ">=", 0.98, true),
-    gate("retrieval_hit_at_5", ratio(sums.retrieval_hits, sums.retrieval_total), ">=", 0.90, true),
-    gate("retrieval_mrr", ratio(sums.reciprocal_rank_sum, sums.retrieval_total), ">=", 0.80, true),
-    gate("wrong_document_count", sums.wrong_document_count, "=", 0, true),
-    gate("unsafe_publish_count", sums.unsafe_publish_count, "=", 0, true),
   ];
+  if (enabled.has("ocr")) metrics.push(gate("critical_field_exact_match", ratio(sums.critical_matched, sums.critical_total), ">=", 1, true));
+  if (enabled.has("cleaning")) {
+    metrics.push(gate("protected_text_preservation", ratio(sums.protected_preserved, sums.protected_total), ">=", 1, true));
+    metrics.push(gate("expected_noise_removal", ratio(sums.noise_removed, sums.noise_total), ">=", 0.95, true));
+  }
+  if (enabled.has("chunk")) metrics.push(gate("answer_span_containment", ratio(sums.spans_contained, sums.spans_total), ">=", 0.98, true));
+  if (enabled.has("retrieval")) {
+    metrics.push(gate("retrieval_hit_at_5", ratio(sums.retrieval_hits, sums.retrieval_total), ">=", 0.90, true));
+    metrics.push(gate("retrieval_mrr", ratio(sums.reciprocal_rank_sum, sums.retrieval_total), ">=", 0.80, true));
+    metrics.push(gate("wrong_document_count", sums.wrong_document_count, "=", 0, true));
+  }
+  if (enabled.has("safety")) metrics.push(gate("unsafe_publish_count", sums.unsafe_publish_count, "=", 0, true));
   if (cerValues.length) metrics.push(gate("mean_character_error_rate", cerValues.reduce((sum, value) => sum + value, 0) / cerValues.length, "<=", 0.03, true));
   if (amplificationValues.length) metrics.push(gate("mean_embedding_amplification", amplificationValues.reduce((sum, value) => sum + value, 0) / amplificationValues.length, "<=", 1.30, false));
   const layerFailures = Object.fromEntries(DOCUMENT_FAILURE_LAYERS.map((layer) => [layer, results.filter((item) => item.failure_layers.includes(layer)).length])) as Record<DocumentFailureLayer, number>;
@@ -368,6 +406,7 @@ export function evaluateDocumentQuality(
     dataset_version: dataset.version,
     dataset_snapshot: dataset.snapshot_id ?? "unversioned",
     split,
+    evaluated_layers: [...enabledLayers],
     generated_at: new Date().toISOString(),
     config_fingerprints: [...new Set(artifacts.map((artifact) => artifact.config_fingerprint))].sort(),
     cases_total: results.length,
@@ -404,5 +443,61 @@ export async function loadDocumentQualityDataset(path: string): Promise<Document
 export function renderDocumentQualityMarkdown(report: DocumentQualityReport): string {
   const metrics = report.metrics.map((metric) => `| ${metric.name} | ${metric.value.toFixed(4)} | ${metric.operator} ${metric.threshold} | ${metric.hard ? "hard" : "soft"} | ${metric.passed ? "PASS" : "FAIL"} |`).join("\n");
   const layers = DOCUMENT_FAILURE_LAYERS.map((layer) => `| ${layer} | ${report.layer_failures[layer]} |`).join("\n");
-  return `# Document Quality Evaluation Report\n\n- Suite: \`${report.suite_id}\`\n- Dataset: \`${report.dataset_id}@${report.dataset_version}\`\n- Snapshot: \`${report.dataset_snapshot}\`\n- Split: \`${report.split}\`\n- Cases: ${report.cases_passed}/${report.cases_total}\n- Gate: **${report.gate_passed ? "PASS" : "FAIL"}**\n\n## Metrics\n\n| Metric | Value | Gate | Type | Result |\n| --- | ---: | ---: | --- | --- |\n${metrics}\n\n## Failure Layers\n\n| Layer | Failed Cases |\n| --- | ---: |\n${layers}\n\n## Failed Cases\n\n${report.failed_cases.length ? report.failed_cases.map((item) => `- \`${item}\``).join("\n") : "- None"}\n`;
+  return `# Document Quality Evaluation Report\n\n- Suite: \`${report.suite_id}\`\n- Dataset: \`${report.dataset_id}@${report.dataset_version}\`\n- Snapshot: \`${report.dataset_snapshot}\`\n- Split: \`${report.split}\`\n- Evaluated layers: ${report.evaluated_layers.map((layer) => `\`${layer}\``).join(", ")}\n- Cases: ${report.cases_passed}/${report.cases_total}\n- Gate: **${report.gate_passed ? "PASS" : "FAIL"}**\n\n> Stages not listed above were not executed and are not counted as pass or fail.\n\n## Metrics\n\n| Metric | Value | Gate | Type | Result |\n| --- | ---: | ---: | --- | --- |\n${metrics}\n\n## Failure Layers\n\n| Layer | Failed Cases |\n| --- | ---: |\n${layers}\n\n## Failed Cases\n\n${report.failed_cases.length ? report.failed_cases.map((item) => `- \`${item}\``).join("\n") : "- None"}\n`;
+}
+
+export function compareDocumentQualityReports(
+  baseline: DocumentQualityReport,
+  candidate: DocumentQualityReport,
+): DocumentQualityComparison {
+  if (baseline.dataset_snapshot !== candidate.dataset_snapshot || baseline.split !== candidate.split) {
+    throw new Error("document quality reports must use the same dataset snapshot and split");
+  }
+  if (baseline.evaluated_layers.join(",") !== candidate.evaluated_layers.join(",")) {
+    throw new Error("document quality reports must evaluate the same ordered layers");
+  }
+  const baselineMetrics = new Map(baseline.metrics.map((metric) => [metric.name, metric]));
+  const metricDeltas = candidate.metrics.flatMap((metric) => {
+    const previous = baselineMetrics.get(metric.name);
+    if (!previous) return [];
+    const delta = metric.value - previous.value;
+    const previousDistance = Math.abs(previous.value - previous.threshold);
+    const candidateDistance = Math.abs(metric.value - metric.threshold);
+    const improved = metric.operator === "<=" ? delta < 0 : metric.operator === ">=" ? delta > 0 : candidateDistance < previousDistance;
+    const regressed = metric.operator === "<=" ? delta > 0 : metric.operator === ">=" ? delta < 0 : candidateDistance > previousDistance;
+    return [{ name: metric.name, baseline: previous.value, candidate: metric.value, delta, improved, regressed }];
+  });
+  const baselineFailed = new Set(baseline.failed_cases);
+  const candidateFailed = new Set(candidate.failed_cases);
+  const fixedCases = baseline.failed_cases.filter((caseID) => !candidateFailed.has(caseID));
+  const regressedCases = candidate.failed_cases.filter((caseID) => !baselineFailed.has(caseID));
+  const regressedMetrics = metricDeltas.filter((metric) => metric.regressed).map((metric) => metric.name);
+  const promotable = candidate.gate_passed && regressedCases.length === 0 && regressedMetrics.length === 0;
+  return {
+    schema: "agent-evaluation.document-quality.comparison.v1",
+    dataset_snapshot: baseline.dataset_snapshot,
+    split: baseline.split,
+    evaluated_layers: [...baseline.evaluated_layers],
+    baseline: {
+      gate_passed: baseline.gate_passed, cases_passed: baseline.cases_passed,
+      cases_total: baseline.cases_total, config_fingerprints: baseline.config_fingerprints,
+    },
+    candidate: {
+      gate_passed: candidate.gate_passed, cases_passed: candidate.cases_passed,
+      cases_total: candidate.cases_total, config_fingerprints: candidate.config_fingerprints,
+    },
+    metric_deltas: metricDeltas,
+    fixed_cases: fixedCases,
+    regressed_cases: regressedCases,
+    regressed_metrics: regressedMetrics,
+    promotable,
+    recommendation: promotable
+      ? `promote candidate; fixed ${fixedCases.length} case(s) with no regression`
+      : `do not promote; candidate has ${candidate.failed_cases.length} failed, ${regressedCases.length} regressed case(s), and ${regressedMetrics.length} regressed metric(s)`,
+  };
+}
+
+export function renderDocumentQualityComparisonMarkdown(comparison: DocumentQualityComparison): string {
+  const metrics = comparison.metric_deltas.map((metric) => `| ${metric.name} | ${metric.baseline.toFixed(4)} | ${metric.candidate.toFixed(4)} | ${metric.delta >= 0 ? "+" : ""}${metric.delta.toFixed(4)} | ${metric.improved ? "improved" : metric.regressed ? "worse" : "unchanged"} |`).join("\n");
+  return `# Document Quality Baseline / Candidate Comparison\n\n- Dataset snapshot: \`${comparison.dataset_snapshot}\`\n- Split: \`${comparison.split}\`\n- Evaluated layers: ${comparison.evaluated_layers.map((layer) => `\`${layer}\``).join(", ")}\n- Baseline: ${comparison.baseline.cases_passed}/${comparison.baseline.cases_total}, gate **${comparison.baseline.gate_passed ? "PASS" : "FAIL"}**\n- Candidate: ${comparison.candidate.cases_passed}/${comparison.candidate.cases_total}, gate **${comparison.candidate.gate_passed ? "PASS" : "FAIL"}**\n- Promotion decision: **${comparison.promotable ? "PROMOTE" : "HOLD"}**\n- Recommendation: ${comparison.recommendation}\n\n## Metric Deltas\n\n| Metric | Baseline | Candidate | Delta | Direction |\n| --- | ---: | ---: | ---: | --- |\n${metrics}\n\n## Fixed Cases\n\n${comparison.fixed_cases.length ? comparison.fixed_cases.map((item) => `- \`${item}\``).join("\n") : "- None"}\n\n## Regressed Cases\n\n${comparison.regressed_cases.length ? comparison.regressed_cases.map((item) => `- \`${item}\``).join("\n") : "- None"}\n\n## Regressed Metrics\n\n${comparison.regressed_metrics.length ? comparison.regressed_metrics.map((item) => `- \`${item}\``).join("\n") : "- None"}\n`;
 }

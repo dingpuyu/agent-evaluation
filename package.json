@@ -11,7 +11,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "test": "tsx --test tests/*.test.ts",
-    "document-eval": "tsx scripts/document_quality_eval.ts"
+    "document-eval": "tsx scripts/document_quality_eval.ts",
+    "document-compare": "tsx scripts/document_quality_compare.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.2",

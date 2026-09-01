@@ -8,6 +8,8 @@ import {
   loadDocumentQualityDataset,
   renderDocumentQualityMarkdown,
   type DocumentPipelineArtifact,
+  DOCUMENT_FAILURE_LAYERS,
+  type DocumentFailureLayer,
 } from "../src/document-quality.js";
 
 function argument(name: string, fallback = ""): string {
@@ -28,6 +30,8 @@ async function main(): Promise<void> {
   if (!artifactsPath) throw new Error("--artifacts is required");
   const split = argument("--split", "all") as DatasetSplit | "all";
   if (!["development", "holdout", "regression", "all"].includes(split)) throw new Error(`invalid split: ${split}`);
+  const layers = argument("--layers", DOCUMENT_FAILURE_LAYERS.join(",")).split(",").map((item) => item.trim()).filter(Boolean) as DocumentFailureLayer[];
+  if (!layers.length || layers.some((layer) => !DOCUMENT_FAILURE_LAYERS.includes(layer))) throw new Error(`invalid layers: ${layers.join(",")}`);
   const jsonOutput = resolve(argument("--output-json", "data/document-quality/report-latest.json"));
   const markdownOutput = resolve(argument("--output-md", "data/document-quality/report-latest.md"));
   const dataset = await loadDocumentQualityDataset(datasetPath);
@@ -38,12 +42,13 @@ async function main(): Promise<void> {
   if (payload.schema !== "agent-evaluation.document-quality.artifacts.v1" || !Array.isArray(payload.artifacts)) {
     throw new Error("unsupported document artifact bundle");
   }
-  const report = evaluateDocumentQuality(dataset, payload.artifacts, split);
+  const report = evaluateDocumentQuality(dataset, payload.artifacts, split, layers);
   await atomicWrite(jsonOutput, `${JSON.stringify(report, null, 2)}\n`);
   await atomicWrite(markdownOutput, renderDocumentQualityMarkdown(report));
   console.log(JSON.stringify({
     status: report.gate_passed ? "passed" : "failed",
     split: report.split,
+    evaluated_layers: report.evaluated_layers,
     cases: `${report.cases_passed}/${report.cases_total}`,
     json: jsonOutput,
     markdown: markdownOutput,

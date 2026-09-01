@@ -103,4 +103,4 @@ Development 形成假设 → Holdout 盲测 → Regression 发布回归 → 人�
 
 针对扫描 PDF、OCR、洗料和 Chunk/Overlap 的下一条跨项目闭环，见 [文档质量 Agent 评测与优化闭环实施方案](docs/document-quality-agent-evaluation-plan.md)。该 Suite 会把 OCR、Layout、Cleaning、Chunk、Retrieval 和 Agent 分层评测，允许质量工程 Agent 在隔离环境中执行受约束的单变量实验，但不允许自动修改或发布生产索引。
 
-Document Quality Suite 的确定性基座已经可运行：9 条 Golden 分为 Development/Holdout/Regression，故障注入覆盖 OCR 错字、洗料误删、Chunk 边界、错误证据和低质量文档误发布。运行 `make document-eval ARTIFACTS=/path/to/artifacts.json SPLIT=development` 可生成 JSON/Markdown 报告；当前契约验证与真实模型边界见 [Phase A 验证报告](docs/document-quality-phase-a-report.md)。
+Document Quality Suite 已包含 10 条 Golden，分为 Development/Holdout/Regression，故障注入覆盖 OCR 错字、洗料误删、Chunk 边界、错误证据和低质量文档误发布。评测可以显式选择实际执行层，未运行的 Retrieval/Safety 不会被伪装成通过；Baseline/Candidate 对比器只有在 Candidate 硬门禁通过且没有新增回退时才建议晋级。契约验证见 [Phase A 报告](docs/document-quality-phase-a-report.md)；RAG 平台真实 OCR/清洗/切块 Artifact 的 `400/100 → 700/80` 实验、失败证据和运行边界见 [Phase B 报告](docs/document-quality-phase-b-report.md)。

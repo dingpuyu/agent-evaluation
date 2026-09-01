@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   characterErrorRate,
+  compareDocumentQualityReports,
   evaluateDocumentCase,
   evaluateDocumentQuality,
   loadDocumentQualityDataset,
@@ -59,8 +60,8 @@ function passingArtifact(): DocumentPipelineArtifact {
 
 test("loads the frozen document quality dataset with source-grouped splits", async () => {
   const dataset = await loadDocumentQualityDataset("./datasets/raglab-document-quality-v1.json");
-  assert.equal(dataset.cases.length, 9);
-  assert.equal(dataset.cases.filter((item) => item.split === "development").length, 3);
+  assert.equal(dataset.cases.length, 10);
+  assert.equal(dataset.cases.filter((item) => item.split === "development").length, 4);
   assert.equal(dataset.cases.filter((item) => item.split === "holdout").length, 3);
   assert.equal(dataset.cases.filter((item) => item.split === "regression").length, 3);
   assert.match(dataset.snapshot_id ?? "", /^sha256:[a-f0-9]{64}$/);
@@ -156,4 +157,99 @@ test("computes Unicode character error rate deterministically", () => {
   assert.equal(characterErrorRate("授权服务人员", "授权服务人员"), 0);
   assert.equal(characterErrorRate("授权服务人员", "授权服务员"), 1 / 6);
   assert.equal(characterErrorRate("BAT-LOW-021", "BAT-LOW-O21"), 1 / 11);
+});
+
+test("reports an explicit document-only scope without pretending retrieval ran", () => {
+  const artifact = passingArtifact();
+  artifact.retrieval = [];
+  artifact.indexed = false;
+  const dataset = {
+    schema: "agent-evaluation.document-quality.dataset.v1",
+    suite_id: "raglab.document-quality.scope-test",
+    dataset_id: "scope-test",
+    version: "1",
+    domain: "test",
+    language: "zh-CN",
+    provenance: "unit-test",
+    contains_patient_data: false,
+    description: "test",
+    split_policy: {
+      development: { purpose: "test", case_count: 1, prompt_visible: true },
+      holdout: { purpose: "test", case_count: 0, prompt_visible: false },
+      regression: { purpose: "test", case_count: 0, prompt_visible: true },
+    },
+    cases: [richCase],
+    snapshot_id: "sha256:test",
+  } satisfies DocumentQualityDataset;
+  const report = evaluateDocumentQuality(dataset, [artifact], "development", ["ocr", "layout", "cleaning", "chunk"]);
+  assert.equal(report.gate_passed, true);
+  assert.deepEqual(report.evaluated_layers, ["ocr", "layout", "cleaning", "chunk"]);
+  assert.equal(report.metrics.some((item) => item.name.startsWith("retrieval_")), false);
+});
+
+test("promotes a candidate that fixes a hard document case without regression", () => {
+  const dataset = {
+    schema: "agent-evaluation.document-quality.dataset.v1",
+    suite_id: "raglab.document-quality.compare-test",
+    dataset_id: "compare-test",
+    version: "1",
+    domain: "test",
+    language: "zh-CN",
+    provenance: "unit-test",
+    contains_patient_data: false,
+    description: "test",
+    split_policy: {
+      development: { purpose: "test", case_count: 1, prompt_visible: true },
+      holdout: { purpose: "test", case_count: 0, prompt_visible: false },
+      regression: { purpose: "test", case_count: 0, prompt_visible: true },
+    },
+    cases: [richCase],
+    snapshot_id: "sha256:test",
+  } satisfies DocumentQualityDataset;
+  const passing = passingArtifact();
+  const broken = passingArtifact();
+  const parent = broken.chunks[0].parent_content;
+  broken.chunks = [
+    { ...broken.chunks[0], content: "BAT-LOW-021 处理：连接交流电源并", parent_content: parent },
+    { ...broken.chunks[0], chunk_id: "c2", content: "连接交流电源并检查电池状态。仅授权服务人员执行", parent_content: parent },
+  ];
+  const layers = ["chunk"] as const;
+  const baseline = evaluateDocumentQuality(dataset, [broken], "development", layers);
+  const candidate = evaluateDocumentQuality(dataset, [passing], "development", layers);
+  const comparison = compareDocumentQualityReports(baseline, candidate);
+  assert.equal(comparison.promotable, true);
+  assert.deepEqual(comparison.fixed_cases, [richCase.case_id]);
+  assert.deepEqual(comparison.regressed_cases, []);
+  assert.deepEqual(comparison.regressed_metrics, []);
+});
+
+test("holds a candidate when a quality metric regresses without crossing its gate", () => {
+  const artifact = passingArtifact();
+  const dataset = {
+    schema: "agent-evaluation.document-quality.dataset.v1",
+    suite_id: "raglab.document-quality.metric-regression",
+    dataset_id: "metric-regression",
+    version: "1",
+    domain: "test",
+    language: "zh-CN",
+    provenance: "unit-test",
+    contains_patient_data: false,
+    description: "test",
+    split_policy: {
+      development: { purpose: "test", case_count: 1, prompt_visible: true },
+      holdout: { purpose: "test", case_count: 0, prompt_visible: false },
+      regression: { purpose: "test", case_count: 0, prompt_visible: true },
+    },
+    cases: [richCase],
+    snapshot_id: "sha256:test",
+  } satisfies DocumentQualityDataset;
+  const baseline = evaluateDocumentQuality(dataset, [artifact], "development", ["chunk"]);
+  const candidate = JSON.parse(JSON.stringify(baseline)) as typeof baseline;
+  const amplification = candidate.metrics.find((metric) => metric.name === "mean_embedding_amplification");
+  assert.ok(amplification);
+  amplification.value = 1.2;
+  amplification.passed = true;
+  const comparison = compareDocumentQualityReports(baseline, candidate);
+  assert.equal(comparison.promotable, false);
+  assert.deepEqual(comparison.regressed_metrics, ["mean_embedding_amplification"]);
 });
