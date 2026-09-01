@@ -29,8 +29,57 @@
   color: var(--muted);
 }
 
+.locator-trace {
+  margin-top: 13px;
+  border: 1px solid #c7d5cf;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.locator-trace header {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  background: #f1f5f2;
+}
+
+.locator-trace header small,
+.locator-trace code {
+  font: 8px var(--mono);
+  color: var(--green);
+}
+
+.locator-trace header b,
+.locator-trace div b {
+  font-size: 10px;
+}
+
+.locator-trace header span,
+.locator-trace div span,
+.locator-trace div small {
+  font-size: 8px;
+  color: var(--muted);
+}
+
+.locator-trace > div {
+  display: grid;
+  grid-template-columns: minmax(140px, .8fr) minmax(170px, 1fr) minmax(180px, 1fr) minmax(120px, .8fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 13px;
+  border-top: 1px solid var(--line);
+}
+
 @media (max-width: 650px) {
   .sandbox-trace {
+    grid-template-columns: 1fr;
+  }
+
+  .locator-trace header,
+  .locator-trace > div {
     grid-template-columns: 1fr;
   }
 }

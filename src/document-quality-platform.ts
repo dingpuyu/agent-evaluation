@@ -78,6 +78,9 @@ export interface RetrievalSandboxRequest {
     content: string;
     source_file: string;
     source_page?: number;
+    source_sheet?: string;
+    source_cell_range?: string;
+    heading_path?: string[];
   }>;
   queries: Array<{ query_id: string; query: string; top_k: number; candidate_k: number }>;
 }
@@ -110,6 +113,9 @@ export interface RetrievalSandboxRun {
       content: string;
       source_file?: string;
       source_page?: number;
+      source_sheet?: string;
+      source_cell_range?: string;
+      heading_path?: string[];
       pre_rerank_rank: number;
       post_rerank_rank: number;
       fusion_score?: number;
@@ -142,6 +148,10 @@ export interface RetrievalSandboxSummary {
       post_rerank_rank: number;
       fusion_score?: number;
       rerank_score?: number;
+      source_page?: number;
+      source_sheet?: string;
+      source_cell_range?: string;
+      heading_path?: string[];
     }>;
   }>;
 }
@@ -331,6 +341,9 @@ function sandboxRequest(
       content: chunk.content,
       source_file: golden.source_group,
       source_page: chunk.source_page,
+      source_sheet: chunk.source_sheet,
+      source_cell_range: chunk.source_cell_range,
+      heading_path: chunk.heading_path,
     }));
   });
   // Keep the reranker pool large enough for recall but bounded independently
@@ -393,8 +406,19 @@ function validateSandboxRun(value: RetrievalSandboxRun, expected: RetrievalSandb
     throw new Error(`${variant} retrieval sandbox returned the wrong query set`);
   }
   for (const query of value.queries) {
-    if (!Array.isArray(query.hits) || query.hits.some((hit) => !hit.chunk_id || !hit.document_id || typeof hit.content !== "string" || hit.post_rerank_rank < 1)) {
-      throw new Error(`${variant} retrieval sandbox returned an invalid hit trace`);
+    if (!Array.isArray(query.hits)) {
+      throw new Error(`${variant} retrieval sandbox query ${query.query_id} omitted the hit list`);
+    }
+    for (const [index, hit] of query.hits.entries()) {
+      const invalid = [
+        !hit.chunk_id ? "chunk_id" : "",
+        !hit.document_id ? "document_id" : "",
+        typeof hit.content !== "string" ? "content" : "",
+        hit.post_rerank_rank < 1 ? "post_rerank_rank" : "",
+      ].filter(Boolean);
+      if (invalid.length) {
+        throw new Error(`${variant} retrieval sandbox query ${query.query_id} hit ${index + 1} has invalid ${invalid.join(",")}`);
+      }
     }
   }
 }
@@ -416,6 +440,9 @@ function artifactsWithRetrieval(bundle: DocumentArtifactBundle, dataset: Documen
           content: hit.content,
           source_file: hit.source_file,
           source_page: hit.source_page,
+          source_sheet: hit.source_sheet,
+          source_cell_range: hit.source_cell_range,
+          heading_path: hit.heading_path,
           fusion_score: hit.fusion_score,
           rerank_score: hit.rerank_score,
           pre_rerank_rank: hit.pre_rerank_rank,
@@ -449,6 +476,10 @@ function sandboxSummary(run: RetrievalSandboxRun): RetrievalSandboxSummary {
         post_rerank_rank: hit.post_rerank_rank,
         fusion_score: hit.fusion_score,
         rerank_score: hit.rerank_score,
+        source_page: hit.source_page,
+        source_sheet: hit.source_sheet,
+        source_cell_range: hit.source_cell_range,
+        heading_path: hit.heading_path,
       })),
     })),
   };

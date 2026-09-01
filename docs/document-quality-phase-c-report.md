@@ -26,6 +26,7 @@ text-embedding-v4 (1024d)
 | Retrieval Hit@5 | 1.00 | 1.00 | 0 |
 | Retrieval MRR | 1.00 | 1.00 | 0 |
 | Retrieval Evidence Span | 0.00 | 1.00 | +1.00 |
+| Retrieval Source Locator | 1.00 | 1.00 | 0 |
 | Mean Embedding Amplification | 1.0734 | 1.0299 | -0.0435 |
 
 ## 第二个 Bad Case：无界 Rerank 候选
@@ -40,6 +41,22 @@ text-embedding-v4 (1024d)
 
 这次经验说明：`Top-K`、ANN/RRF Candidate 和 Rerank Candidate 是三个不同参数，不能共用一个“越多越好”的数字。
 
+## 第三个 Bad Case：文档命中但结构化引用丢失
+
+Parser 的 XLSX Document IR 已正确输出：
+
+```text
+sheet=兼容矩阵
+cell_range=A1:C1,A3:C3
+heading_path=[兼容矩阵]
+```
+
+但首版无索引 Artifact DTO 只复制 `source_page`，导致 Sheet/Cell Range 在进入临时 Milvus 前丢失。文档级 Hit@5/MRR 仍为 1.0，因此旧指标无法发现这个问题。
+
+修复后，Artifact Block/Chunk、Sandbox Request、Milvus Record、Search Hit 和持久化 Rank Trace 全部保留 Page、Sheet、Cell Range 与 Heading Path。新增硬指标 `retrieval_source_locator_accuracy`，并要求同一条 Hit 同时满足定位元组，不能用多个错误 Chunk 分别凑齐 Sheet 和 Range。注入反例验证：正确文档不变，只把 `A1:C1,A3:C3` 改为 `A1:C1,A2:C2`，Candidate 即从 PASS 变为 HOLD，定位准确率降到 `0.5`。
+
+真实 Provider 复跑：冻结数据集 `v1.3.0`（Snapshot `sha256:ff11ed0c…`）上的 `docqexp_6208de8661b64bf3a75d6f0efe6f4819`，Candidate 4/4，Locator Accuracy `1.0`，XLSX 证据在 Rerank 后排名第 1，临时 Collection 清理成功。
+
 ## 隔离与安全验证
 
 - 只有目标系统 `admin/platform_admin` 可运行；viewer 实测返回 403。
@@ -51,4 +68,4 @@ text-embedding-v4 (1024d)
 
 ## 下一步
 
-冻结当前 Candidate，进入一次性 Holdout。之后将本次长步骤证据残缺和无界 Candidate 两个问题固化进 Regression，再补 PDF Page 与 XLSX Sheet/Cell Range 的引用正确性门禁。
+冻结当前 Candidate，进入一次性 Holdout。之后将长步骤证据残缺、无界 Candidate 和结构化引用丢失三个问题固化进 Regression；位置门禁下一轮扩展到跨页表格、合并单元格和多个可接受定位范围。

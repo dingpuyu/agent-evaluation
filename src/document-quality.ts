@@ -19,6 +19,15 @@ export interface DocumentRetrievalGolden {
   required_document_ids: string[];
   forbidden_document_ids?: string[];
   required_source_pages?: number[];
+  required_source_sheets?: string[];
+  required_source_cell_ranges?: string[];
+  required_heading_paths?: string[][];
+  required_source_locators?: Array<{
+    source_page?: number;
+    source_sheet?: string;
+    source_cell_range?: string;
+    heading_path?: string[];
+  }>;
   required_content_spans?: string[];
 }
 
@@ -58,6 +67,8 @@ export interface DocumentArtifactBlock {
   block_type: string;
   text: string;
   page?: number;
+  source_sheet?: string;
+  source_cell_range?: string;
   heading_path?: string[];
   confidence?: number;
 }
@@ -72,6 +83,9 @@ export interface DocumentChunkArtifact {
   content: string;
   parent_content?: string;
   source_page?: number;
+  source_sheet?: string;
+  source_cell_range?: string;
+  heading_path?: string[];
 }
 
 export interface DocumentRetrievalArtifact {
@@ -81,6 +95,9 @@ export interface DocumentRetrievalArtifact {
     chunk_id?: string;
     content?: string;
     source_page?: number;
+    source_sheet?: string;
+    source_cell_range?: string;
+    heading_path?: string[];
     source_file?: string;
     score?: number;
     fusion_score?: number;
@@ -128,6 +145,8 @@ interface CaseMeasurements {
   wrong_document_count: number;
   retrieval_evidence_spans_total: number;
   retrieval_evidence_spans_contained: number;
+  retrieval_locators_total: number;
+  retrieval_locators_matched: number;
   unsafe_publish_count: number;
   character_error_rate?: number;
   embedding_amplification?: number;
@@ -270,6 +289,15 @@ export function evaluateDocumentCase(
       ? (item.retrieval_queries ?? []).reduce((total, query) => total + (query.required_content_spans?.length ?? 0), 0)
       : 0,
     retrieval_evidence_spans_contained: 0,
+    retrieval_locators_total: enabled.has("retrieval")
+      ? (item.retrieval_queries ?? []).reduce((total, query) => total
+        + (query.required_source_pages?.length ?? 0)
+        + (query.required_source_sheets?.length ?? 0)
+        + (query.required_source_cell_ranges?.length ?? 0)
+        + (query.required_heading_paths?.length ?? 0)
+        + (query.required_source_locators?.length ?? 0), 0)
+      : 0,
+    retrieval_locators_matched: 0,
     unsafe_publish_count: enabled.has("safety") && artifact.status !== "ready" && artifact.indexed ? 1 : 0,
     embedding_amplification: enabled.has("chunk") ? embeddingAmplification(artifact.chunks) : undefined,
   };
@@ -343,8 +371,29 @@ export function evaluateDocumentCase(
     if (rankIndex >= 0) measurements.reciprocal_rank_sum += 1 / (rankIndex + 1);
     const wrong = documentIDs.filter((documentID) => golden.forbidden_document_ids?.includes(documentID)).length;
     measurements.wrong_document_count += wrong;
-    const pages = new Set(actual?.hits.filter((hitItem) => golden.required_document_ids.includes(hitItem.document_id)).map((hitItem) => hitItem.source_page) ?? []);
+    const requiredDocumentHits = actual?.hits.filter((hitItem) => golden.required_document_ids.includes(hitItem.document_id)) ?? [];
+    const pages = new Set(requiredDocumentHits.map((hitItem) => hitItem.source_page));
+    const sheets = new Set(requiredDocumentHits.map((hitItem) => hitItem.source_sheet));
+    const cellRanges = new Set(requiredDocumentHits.map((hitItem) => hitItem.source_cell_range));
+    const headingPaths = requiredDocumentHits.map((hitItem) => hitItem.heading_path ?? []);
     const pagesPassed = (golden.required_source_pages ?? []).every((page) => pages.has(page));
+    const sheetsPassed = (golden.required_source_sheets ?? []).every((sheet) => sheets.has(sheet));
+    const cellRangesPassed = (golden.required_source_cell_ranges ?? []).every((cellRange) => cellRanges.has(cellRange));
+    const headingPathsPassed = (golden.required_heading_paths ?? []).every((expectedPath) => headingPaths.some((actualPath) =>
+      expectedPath.length === actualPath.length && expectedPath.every((part, index) => part === actualPath[index])));
+    const locatorMatches = (golden.required_source_locators ?? []).map((locator) => requiredDocumentHits.some((hitItem) =>
+      (locator.source_page === undefined || hitItem.source_page === locator.source_page)
+      && (locator.source_sheet === undefined || hitItem.source_sheet === locator.source_sheet)
+      && (locator.source_cell_range === undefined || hitItem.source_cell_range === locator.source_cell_range)
+      && (locator.heading_path === undefined || (hitItem.heading_path?.length === locator.heading_path.length
+        && locator.heading_path.every((part, index) => part === hitItem.heading_path?.[index])))));
+    const locatorsPassed = locatorMatches.every(Boolean);
+    measurements.retrieval_locators_matched += (golden.required_source_pages ?? []).filter((page) => pages.has(page)).length;
+    measurements.retrieval_locators_matched += (golden.required_source_sheets ?? []).filter((sheet) => sheets.has(sheet)).length;
+    measurements.retrieval_locators_matched += (golden.required_source_cell_ranges ?? []).filter((cellRange) => cellRanges.has(cellRange)).length;
+    measurements.retrieval_locators_matched += (golden.required_heading_paths ?? []).filter((expectedPath) => headingPaths.some((actualPath) =>
+      expectedPath.length === actualPath.length && expectedPath.every((part, index) => part === actualPath[index]))).length;
+    measurements.retrieval_locators_matched += locatorMatches.filter(Boolean).length;
     for (const span of golden.required_content_spans ?? []) {
       const contained = actual?.hits.some((hitItem) => containsIgnoringWhitespace(hitItem.content ?? "", span)) ?? false;
       if (contained) measurements.retrieval_evidence_spans_contained += 1;
@@ -353,6 +402,10 @@ export function evaluateDocumentCase(
     checks.push(check({ name: `retrieval_hit:${golden.query_id}`, layer: "retrieval", hard: true, passed: hit }));
     checks.push(check({ name: `retrieval_forbidden:${golden.query_id}`, layer: "retrieval", hard: true, passed: wrong === 0, expected: 0, actual: wrong }));
     checks.push(check({ name: `retrieval_source_page:${golden.query_id}`, layer: "retrieval", hard: true, passed: pagesPassed }));
+    checks.push(check({ name: `retrieval_source_sheet:${golden.query_id}`, layer: "retrieval", hard: true, passed: sheetsPassed }));
+    checks.push(check({ name: `retrieval_source_cell_range:${golden.query_id}`, layer: "retrieval", hard: true, passed: cellRangesPassed }));
+    checks.push(check({ name: `retrieval_heading_path:${golden.query_id}`, layer: "retrieval", hard: true, passed: headingPathsPassed }));
+    checks.push(check({ name: `retrieval_source_locator:${golden.query_id}`, layer: "retrieval", hard: true, passed: locatorsPassed }));
   }
 
   if (enabled.has("ocr") && item.expected_text !== undefined) {
@@ -400,6 +453,7 @@ export function evaluateDocumentQuality(
     retrieval_total: 0, retrieval_hits: 0, reciprocal_rank_sum: 0,
     wrong_document_count: 0, unsafe_publish_count: 0,
     retrieval_evidence_spans_total: 0, retrieval_evidence_spans_contained: 0,
+    retrieval_locators_total: 0, retrieval_locators_matched: 0,
   });
   const cerValues = results.map((item) => item.measurements.character_error_rate).filter((value): value is number => value !== undefined);
   const amplificationValues = results.map((item) => item.measurements.embedding_amplification).filter((value): value is number => value !== undefined);
@@ -419,6 +473,7 @@ export function evaluateDocumentQuality(
     metrics.push(gate("retrieval_mrr", ratio(sums.reciprocal_rank_sum, sums.retrieval_total), ">=", 0.80, true));
     metrics.push(gate("wrong_document_count", sums.wrong_document_count, "=", 0, true));
     metrics.push(gate("retrieval_evidence_span_containment", ratio(sums.retrieval_evidence_spans_contained, sums.retrieval_evidence_spans_total), ">=", 1, true));
+    metrics.push(gate("retrieval_source_locator_accuracy", ratio(sums.retrieval_locators_matched, sums.retrieval_locators_total), ">=", 1, true));
   }
   if (enabled.has("safety")) metrics.push(gate("unsafe_publish_count", sums.unsafe_publish_count, "=", 0, true));
   if (cerValues.length) metrics.push(gate("mean_character_error_rate", cerValues.reduce((sum, value) => sum + value, 0) / cerValues.length, "<=", 0.03, true));

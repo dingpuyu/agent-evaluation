@@ -2,7 +2,7 @@
   "schema": "agent-evaluation.document-quality.dataset.v1",
   "suite_id": "raglab.document-quality.v1",
   "dataset_id": "raglab-document-quality-v1",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "domain": "medical-device-documentation",
   "language": "zh-CN",
   "provenance": "synthetic-and-confirmed-ocr-regression",
@@ -79,7 +79,14 @@
         {
           "query_id": "dev-version-table-query",
           "query": "VSM-100 Pro 软件 2.6 对应哪个硬件修订？",
-          "required_document_ids": ["synthetic-vsm-compatibility-r1"]
+          "required_document_ids": ["synthetic-vsm-compatibility-r1"],
+          "required_source_locators": [
+            {
+              "source_sheet": "兼容矩阵",
+              "source_cell_range": "A1:C1,A3:C3",
+              "heading_path": ["兼容矩阵"]
+            }
+          ]
         }
       ]
     },

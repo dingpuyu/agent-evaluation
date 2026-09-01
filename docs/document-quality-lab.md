@@ -12,7 +12,7 @@ RAG 无索引 Artifact
 → Baseline / Candidate 单变量校验
 → OCR / Layout / Cleaning / Chunk 分层指标
 → Qwen Embedding → 临时 Milvus Hybrid → Qwen Rerank
-→ 文档命中 + 单 Chunk 证据完整性指标
+→ 文档命中 + 单 Chunk 证据完整性 + 结构化引用定位指标
 → 退化检测
 → 人工审核的晋级建议
 ```
@@ -53,11 +53,14 @@ RAG 无索引 Artifact
 | Mean Embedding Amplification | 1.0734 | 1.0299 | 重叠导致的重复向量成本下降 |
 | Retrieval Hit@5 / MRR | 1.00 / 1.00 | 1.00 / 1.00 | 文档级指标看不出差异 |
 | Retrieval Evidence Span | 0.00 | 1.00 | 只有 Candidate 的单个证据 Chunk 含完整操作步骤 |
+| Retrieval Source Locator | 1.00 | 1.00 | PDF Page 与 XLSX Sheet/Cell Range/Heading Path 均匹配 Golden |
 | 新增失败 / 退化指标 | 0 / 0 | 0 / 0 | 满足 Development Retrieval 晋级规则 |
 
 根因不是“模型不够聪明”，而是 `chunk` 层把必须一起出现的步骤切开。增大窗口的同时把 Overlap 从 25% 降到约 11.4%，既恢复完整语义单元，也没有增加重复向量成本。
 
 首轮把当前 34 个 chunks 全送入 Qwen Rerank，暴露了不必要的调用量。候选池收敛到 Top 20 后再次运行，全部质量指标不回退；单次网络时延存在抖动，所以延迟只作为软指标记录，不能凭一次样本宣称固定百分比收益。
+
+继续沿来源链路检查时又发现一次真实契约截断：Document IR 中已经存在 XLSX Sheet/Cell Range，但 Artifact DTO 没有复制。修复后网页会单独展示结构化 Citation Trace；正确文档但错误行范围不再通过门禁。
 
 这个结果不能直接外推成通用参数：它只覆盖 4 条 Development Case。长表格、跨页说明书、相似型号和版本隔离仍必须继续经过 Holdout 与 Regression。
 
@@ -104,11 +107,11 @@ Browser Artifact (request memory only)
 → persist metrics + provider/rank trace only
 ```
 
-网页会显示 Embedding、维度、Reranker、Chunk 数、总耗时和 cleanup 状态。持久化实验不包含 Baseline/Candidate Artifact、Chunk 正文或访问令牌。
+网页会显示 Embedding、维度、Reranker、Chunk 数、总耗时、cleanup 状态和命中证据的 Page/Sheet/Cell Range/Heading Path。持久化实验不包含 Baseline/Candidate Artifact、Chunk 正文或访问令牌。
 
 ## 7. 下一阶段
 
 1. 冻结 `700/80 + candidate_top_n=20`，只运行一次 Holdout；失败则回到 Development 形成新假设，不能查看盲测题后原地微调。
 2. 将已确认的 Chunk、OCR、Cleaner 和 Evidence Span Bad Case 写入 Regression，作为发布零退化门禁。
-3. 增加来源页/Sheet/Cell Range 的 Retrieval 引用门禁，解决 XLSX 与 PDF 位置语义不同的问题。
+3. 已完成来源页/Sheet/Cell Range/Heading Path 的 Retrieval 引用门禁；下一轮增加跨页表格与多定位 Golden。
 4. 接入人工审批，只有 Holdout 与 Regression 均通过才允许生成索引发布请求；评测平台自身仍不直接改生产。

@@ -115,6 +115,9 @@ function sandboxResult(request: RetrievalSandboxRequest): RetrievalSandboxRun {
           content: hit.content,
           source_file: hit.source_file,
           source_page: hit.source_page,
+          source_sheet: query.query_id === "dev-version-table-query" ? "兼容矩阵" : hit.source_sheet,
+          source_cell_range: query.query_id === "dev-version-table-query" ? "A1:C1,A3:C3" : hit.source_cell_range,
+          heading_path: query.query_id === "dev-version-table-query" ? ["兼容矩阵"] : hit.heading_path,
           pre_rerank_rank: 2,
           post_rerank_rank: 1,
           fusion_score: 0.02,
@@ -154,7 +157,40 @@ test("runs a real-provider retrieval contract without persisting raw chunks", as
   assert.equal(experiment.promotion_status, "retrieval_passed");
   assert.equal(experiment.baseline_report.metrics.find((item) => item.name === "retrieval_evidence_span_containment")?.value, 0);
   assert.equal(experiment.candidate_report.metrics.find((item) => item.name === "retrieval_evidence_span_containment")?.value, 1);
+  assert.equal(experiment.candidate_report.metrics.find((item) => item.name === "retrieval_source_locator_accuracy")?.value, 1);
   assert.equal(experiment.retrieval_sandbox?.candidate.cleanup_completed, true);
+  const locatorHit = experiment.retrieval_sandbox?.candidate.queries.find((item) => item.query_id === "dev-version-table-query")?.hits[0];
+  assert.equal(locatorHit?.source_sheet, "兼容矩阵");
+  assert.equal(locatorHit?.source_cell_range, "A1:C1,A3:C3");
   assert.equal("baseline_bundle" in experiment, false);
   assert.equal("candidate_bundle" in experiment, false);
+});
+
+test("holds a candidate when the document is correct but the structured citation locator is wrong", async () => {
+  const dataset = await loadDocumentQualityDataset("./datasets/raglab-document-quality-v1.json");
+  const candidate = await candidateBundle();
+  const baseline = clone(candidate);
+  baseline.config = { max_runes: 400, overlap_runes: 100 };
+  const prepared = prepareDocumentQualityRetrievalExperiment({
+    dataset,
+    intervention: { variable: "chunk_profile", baseline: "400/100", candidate: "700/80" },
+    baseline_artifacts: baseline,
+    candidate_artifacts: candidate,
+  });
+  const baselineRun = sandboxResult(prepared.baseline_request);
+  const candidateRun = sandboxResult(prepared.candidate_request);
+  const tableHit = candidateRun.queries.find((item) => item.query_id === "dev-version-table-query")?.hits[0];
+  assert.ok(tableHit);
+  tableHit.source_cell_range = "A1:C1,A2:C2";
+
+  const experiment = completeDocumentQualityRetrievalExperiment({
+    identity: { subject: "alice", tenant_id: "tenant_a", roles: ["admin"] },
+    dataset,
+    prepared,
+    baseline_retrieval: baselineRun,
+    candidate_retrieval: candidateRun,
+  });
+  assert.equal(experiment.promotion_status, "hold");
+  assert.equal(experiment.candidate_report.metrics.find((item) => item.name === "retrieval_source_locator_accuracy")?.value, 0.5);
+  assert.equal(experiment.candidate_report.results.find((item) => item.case_id === "dev-table-version-003")?.passed, false);
 });
