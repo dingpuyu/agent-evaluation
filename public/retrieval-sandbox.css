@@ -1,0 +1,36 @@
+.sandbox-trace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 13px;
+}
+
+.sandbox-trace article {
+  padding: 13px;
+  border: 1px solid #9ecfbd;
+  border-radius: 10px;
+  background: #eef9f4;
+  display: grid;
+  gap: 5px;
+}
+
+.sandbox-trace small {
+  font: 8px var(--mono);
+  color: var(--green);
+}
+
+.sandbox-trace b {
+  font-size: 11px;
+}
+
+.sandbox-trace span,
+.sandbox-trace code {
+  font-size: 8px;
+  color: var(--muted);
+}
+
+@media (max-width: 650px) {
+  .sandbox-trace {
+    grid-template-columns: 1fr;
+  }
+}

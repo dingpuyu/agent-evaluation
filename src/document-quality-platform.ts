@@ -13,6 +13,7 @@ import {
 } from "./document-quality.js";
 
 export const DOCUMENT_PREINDEX_LAYERS = ["ocr", "layout", "cleaning", "chunk"] as const satisfies readonly DocumentFailureLayer[];
+export const DOCUMENT_RETRIEVAL_LAYERS = ["ocr", "layout", "cleaning", "chunk", "retrieval"] as const satisfies readonly DocumentFailureLayer[];
 
 export interface DocumentArtifactBundle {
   schema: "agent-evaluation.document-quality.artifacts.v1";
@@ -51,14 +52,108 @@ export interface DocumentQualityExperiment {
     split: "development";
   };
   evaluated_layers: DocumentFailureLayer[];
+  execution_stage: "pre-index" | "retrieval-sandbox";
   intervention: DocumentQualityIntervention;
   baseline_report: DocumentQualityReport;
   candidate_report: DocumentQualityReport;
   comparison: DocumentQualityComparison;
   diagnosis: DocumentQualityDiagnosis;
-  promotion_status: "development_passed" | "hold";
+  promotion_status: "development_passed" | "retrieval_passed" | "hold";
+  retrieval_sandbox?: {
+    baseline: RetrievalSandboxSummary;
+    candidate: RetrievalSandboxSummary;
+  };
   production_mutation: false;
   raw_artifacts_persisted: false;
+}
+
+export interface RetrievalSandboxRequest {
+  run_id: string;
+  variant: "baseline" | "candidate";
+  chunks: Array<{
+    chunk_id: string;
+    document_id: string;
+    dataset_id: string;
+    title: string;
+    content: string;
+    source_file: string;
+    source_page?: number;
+  }>;
+  queries: Array<{ query_id: string; query: string; top_k: number; candidate_k: number }>;
+}
+
+export interface RetrievalSandboxRun {
+  schema: "raglab.retrieval-sandbox.run.v1";
+  run_id: string;
+  variant: string;
+  collection_scope: "temporary-isolated";
+  embedder: string;
+  dimensions: number;
+  reranker: string;
+  retrieval: string;
+  index: string;
+  chunks_indexed: number;
+  index_build_latency_ms: number;
+  total_latency_ms: number;
+  cleanup_completed: boolean;
+  production_mutation: false;
+  queries: Array<{
+    query_id: string;
+    query: string;
+    embedding_latency_ms: number;
+    search_latency_ms: number;
+    rerank_latency_ms: number;
+    hits: Array<{
+      chunk_id: string;
+      document_id: string;
+      title?: string;
+      content: string;
+      source_file?: string;
+      source_page?: number;
+      pre_rerank_rank: number;
+      post_rerank_rank: number;
+      fusion_score?: number;
+      rerank_score?: number;
+      recall_sources?: string[];
+      exact_matches?: string[];
+    }>;
+  }>;
+}
+
+export interface RetrievalSandboxSummary {
+  provider: { embedder: string; dimensions: number; reranker: string };
+  retrieval: string;
+  index: string;
+  collection_scope: "temporary-isolated";
+  chunks_indexed: number;
+  cleanup_completed: boolean;
+  production_mutation: false;
+  index_build_latency_ms: number;
+  total_latency_ms: number;
+  queries: Array<{
+    query_id: string;
+    embedding_latency_ms: number;
+    search_latency_ms: number;
+    rerank_latency_ms: number;
+    hits: Array<{
+      chunk_id: string;
+      document_id: string;
+      pre_rerank_rank: number;
+      post_rerank_rank: number;
+      fusion_score?: number;
+      rerank_score?: number;
+    }>;
+  }>;
+}
+
+export interface PreparedRetrievalExperiment {
+  run_id: string;
+  started_at: string;
+  baseline_bundle: DocumentArtifactBundle;
+  candidate_bundle: DocumentArtifactBundle;
+  intervention: DocumentQualityIntervention;
+  baseline_request: RetrievalSandboxRequest;
+  candidate_request: RetrievalSandboxRequest;
 }
 
 export interface RunDocumentQualityExperimentInput {
@@ -205,12 +300,209 @@ export function runDocumentQualityExperiment(input: RunDocumentQualityExperiment
       split: "development",
     },
     evaluated_layers: layers,
+    execution_stage: "pre-index",
     intervention: selectedIntervention,
     baseline_report: baselineReport,
     candidate_report: candidateReport,
     comparison,
     diagnosis,
     promotion_status: comparison.promotable ? "development_passed" : "hold",
+    production_mutation: false,
+    raw_artifacts_persisted: false,
+  };
+}
+
+function sandboxRequest(
+  runID: string,
+  variant: "baseline" | "candidate",
+  dataset: DocumentQualityDataset,
+  bundle: DocumentArtifactBundle,
+): RetrievalSandboxRequest {
+  const development = dataset.cases.filter((item) => item.split === "development");
+  const caseByID = new Map(development.map((item) => [item.case_id, item]));
+  const chunks = bundle.artifacts.flatMap((artifact) => {
+    const golden = caseByID.get(artifact.case_id);
+    if (!golden) return [];
+    return artifact.chunks.map((chunk) => ({
+      chunk_id: chunk.chunk_id,
+      document_id: golden.source_group,
+      dataset_id: dataset.dataset_id,
+      title: golden.source_group,
+      content: chunk.content,
+      source_file: golden.source_group,
+      source_page: chunk.source_page,
+    }));
+  });
+  // Keep the reranker pool large enough for recall but bounded independently
+  // from corpus/chunk count. The first real run sent all 34 candidates to
+  // Qwen; top-20 preserved every golden hit while cutting provider work.
+  const candidateK = 20;
+  const queries = development.flatMap((item) => (item.retrieval_queries ?? []).map((query) => ({
+    query_id: query.query_id,
+    query: query.query,
+    top_k: 5,
+    candidate_k: candidateK,
+  })));
+  if (!queries.length) throw new Error("development split has no retrieval queries");
+  return { run_id: runID, variant, chunks, queries };
+}
+
+export function prepareDocumentQualityRetrievalExperiment(input: {
+  dataset: DocumentQualityDataset;
+  split?: unknown;
+  intervention?: unknown;
+  baseline_artifacts?: unknown;
+  candidate_artifacts?: unknown;
+}): PreparedRetrievalExperiment {
+  if (String(input.split ?? "development") !== "development") {
+    throw new Error("interactive tuning is restricted to the development split");
+  }
+  const baseline = artifactBundle(input.baseline_artifacts, "baseline_artifacts");
+  const candidate = artifactBundle(input.candidate_artifacts, "candidate_artifacts");
+  assertExactCaseSet(input.dataset, baseline, "baseline_artifacts");
+  assertExactCaseSet(input.dataset, candidate, "candidate_artifacts");
+  assertSingleVariableExperiment(baseline, candidate);
+  const selectedIntervention = intervention(input.intervention, baseline, candidate);
+  const runID = `docqrun_${randomUUID().replaceAll("-", "")}`;
+  return {
+    run_id: runID,
+    started_at: new Date().toISOString(),
+    baseline_bundle: baseline,
+    candidate_bundle: candidate,
+    intervention: selectedIntervention,
+    baseline_request: sandboxRequest(runID, "baseline", input.dataset, baseline),
+    candidate_request: sandboxRequest(runID, "candidate", input.dataset, candidate),
+  };
+}
+
+function validateSandboxRun(value: RetrievalSandboxRun, expected: RetrievalSandboxRequest): void {
+  if (value.schema !== "raglab.retrieval-sandbox.run.v1" || value.run_id !== expected.run_id || value.variant !== expected.variant) {
+    const variant = expected.variant;
+    throw new Error(`${variant} retrieval sandbox returned an invalid run contract`);
+  }
+  const variant = expected.variant;
+  if (value.collection_scope !== "temporary-isolated" || !value.cleanup_completed || value.production_mutation !== false) {
+    throw new Error(`${variant} retrieval sandbox did not prove isolation and cleanup`);
+  }
+  if (!value.embedder || !value.reranker || !value.dimensions || value.chunks_indexed !== expected.chunks.length || !Array.isArray(value.queries)) {
+    throw new Error(`${variant} retrieval sandbox omitted provider trace data`);
+  }
+  const expectedQueries = expected.queries.map((query) => query.query_id).sort();
+  const actualQueries = value.queries.map((query) => query.query_id).sort();
+  if (new Set(actualQueries).size !== actualQueries.length || JSON.stringify(actualQueries) !== JSON.stringify(expectedQueries)) {
+    throw new Error(`${variant} retrieval sandbox returned the wrong query set`);
+  }
+  for (const query of value.queries) {
+    if (!Array.isArray(query.hits) || query.hits.some((hit) => !hit.chunk_id || !hit.document_id || typeof hit.content !== "string" || hit.post_rerank_rank < 1)) {
+      throw new Error(`${variant} retrieval sandbox returned an invalid hit trace`);
+    }
+  }
+}
+
+function artifactsWithRetrieval(bundle: DocumentArtifactBundle, dataset: DocumentQualityDataset, run: RetrievalSandboxRun): DocumentPipelineArtifact[] {
+  const queryByID = new Map(run.queries.map((query) => [query.query_id, query]));
+  const caseByID = new Map(dataset.cases.filter((item) => item.split === "development").map((item) => [item.case_id, item]));
+  return bundle.artifacts.map((artifact) => ({
+    ...artifact,
+    indexed: true,
+    retrieval: (caseByID.get(artifact.case_id)?.retrieval_queries ?? []).map((golden) => {
+      const actual = queryByID.get(golden.query_id);
+      if (!actual) throw new Error(`retrieval sandbox omitted query ${golden.query_id}`);
+      return {
+        query_id: golden.query_id,
+        hits: actual.hits.map((hit) => ({
+          document_id: hit.document_id,
+          chunk_id: hit.chunk_id,
+          content: hit.content,
+          source_file: hit.source_file,
+          source_page: hit.source_page,
+          fusion_score: hit.fusion_score,
+          rerank_score: hit.rerank_score,
+          pre_rerank_rank: hit.pre_rerank_rank,
+          post_rerank_rank: hit.post_rerank_rank,
+        })),
+      };
+    }),
+  }));
+}
+
+function sandboxSummary(run: RetrievalSandboxRun): RetrievalSandboxSummary {
+  return {
+    provider: { embedder: run.embedder, dimensions: run.dimensions, reranker: run.reranker },
+    retrieval: run.retrieval,
+    index: run.index,
+    collection_scope: run.collection_scope,
+    chunks_indexed: run.chunks_indexed,
+    cleanup_completed: run.cleanup_completed,
+    production_mutation: false,
+    index_build_latency_ms: run.index_build_latency_ms,
+    total_latency_ms: run.total_latency_ms,
+    queries: run.queries.map((query) => ({
+      query_id: query.query_id,
+      embedding_latency_ms: query.embedding_latency_ms,
+      search_latency_ms: query.search_latency_ms,
+      rerank_latency_ms: query.rerank_latency_ms,
+      hits: query.hits.map((hit) => ({
+        chunk_id: hit.chunk_id,
+        document_id: hit.document_id,
+        pre_rerank_rank: hit.pre_rerank_rank,
+        post_rerank_rank: hit.post_rerank_rank,
+        fusion_score: hit.fusion_score,
+        rerank_score: hit.rerank_score,
+      })),
+    })),
+  };
+}
+
+export function completeDocumentQualityRetrievalExperiment(input: {
+  identity: Identity;
+  dataset: DocumentQualityDataset;
+  prepared: PreparedRetrievalExperiment;
+  baseline_retrieval: RetrievalSandboxRun;
+  candidate_retrieval: RetrievalSandboxRun;
+}): DocumentQualityExperiment {
+  validateSandboxRun(input.baseline_retrieval, input.prepared.baseline_request);
+  validateSandboxRun(input.candidate_retrieval, input.prepared.candidate_request);
+  const baselineReport = evaluateDocumentQuality(
+    input.dataset,
+    artifactsWithRetrieval(input.prepared.baseline_bundle, input.dataset, input.baseline_retrieval),
+    "development",
+    DOCUMENT_RETRIEVAL_LAYERS,
+  );
+  const candidateReport = evaluateDocumentQuality(
+    input.dataset,
+    artifactsWithRetrieval(input.prepared.candidate_bundle, input.dataset, input.candidate_retrieval),
+    "development",
+    DOCUMENT_RETRIEVAL_LAYERS,
+  );
+  const comparison = compareDocumentQualityReports(baselineReport, candidateReport);
+  const diagnosis = diagnose(baselineReport, candidateReport, comparison);
+  return {
+    schema: "agent-evaluation.document-quality.experiment.v1",
+    experiment_id: `docqexp_${randomUUID().replaceAll("-", "")}`,
+    tenant_id: input.identity.tenant_id,
+    requested_by: input.identity.subject,
+    started_at: input.prepared.started_at,
+    completed_at: new Date().toISOString(),
+    dataset: {
+      suite_id: input.dataset.suite_id,
+      dataset_id: input.dataset.dataset_id,
+      version: input.dataset.version,
+      snapshot: input.dataset.snapshot_id ?? "unversioned",
+      split: "development",
+    },
+    evaluated_layers: [...DOCUMENT_RETRIEVAL_LAYERS],
+    execution_stage: "retrieval-sandbox",
+    intervention: input.prepared.intervention,
+    baseline_report: baselineReport,
+    candidate_report: candidateReport,
+    comparison,
+    diagnosis,
+    promotion_status: comparison.promotable ? "retrieval_passed" : "hold",
+    retrieval_sandbox: {
+      baseline: sandboxSummary(input.baseline_retrieval),
+      candidate: sandboxSummary(input.candidate_retrieval),
+    },
     production_mutation: false,
     raw_artifacts_persisted: false,
   };

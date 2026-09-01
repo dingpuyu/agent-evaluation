@@ -2,7 +2,7 @@
   "schema": "agent-evaluation.document-quality.dataset.v1",
   "suite_id": "raglab.document-quality.v1",
   "dataset_id": "raglab-document-quality-v1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "domain": "medical-device-documentation",
   "language": "zh-CN",
   "provenance": "synthetic-and-confirmed-ocr-regression",
@@ -79,8 +79,7 @@
         {
           "query_id": "dev-version-table-query",
           "query": "VSM-100 Pro 软件 2.6 对应哪个硬件修订？",
-          "required_document_ids": ["synthetic-vsm-compatibility-r1"],
-          "required_source_pages": [2]
+          "required_document_ids": ["synthetic-vsm-compatibility-r1"]
         }
       ]
     },
@@ -92,7 +91,15 @@
       "expected_status": "ready",
       "critical_fields": ["BAT-SVC-088", "VSM-300"],
       "protected_text": ["BAT-SVC-088", "VSM-300"],
-      "required_chunk_spans": ["处理步骤：先断开 VSM-300 外部电源并记录 BAT-SVC-088，再确认备用电池已隔离；随后依次检查电池连接器、保险丝状态与电源管理板指示灯，禁止跳过绝缘检查；完成后恢复供电并观察十五分钟，确认错误码不再出现，最后把测量值、设备序列号、软件版本和复核人员写入服务记录。"]
+      "required_chunk_spans": ["处理步骤：先断开 VSM-300 外部电源并记录 BAT-SVC-088，再确认备用电池已隔离；随后依次检查电池连接器、保险丝状态与电源管理板指示灯，禁止跳过绝缘检查；完成后恢复供电并观察十五分钟，确认错误码不再出现，最后把测量值、设备序列号、软件版本和复核人员写入服务记录。"],
+      "retrieval_queries": [
+        {
+          "query_id": "dev-long-procedure-query",
+          "query": "VSM-300 出现 BAT-SVC-088 后完整的处理和记录步骤是什么？",
+          "required_document_ids": ["synthetic-long-service-procedure-r1"],
+          "required_content_spans": ["处理步骤：先断开 VSM-300 外部电源并记录 BAT-SVC-088，再确认备用电池已隔离；随后依次检查电池连接器、保险丝状态与电源管理板指示灯，禁止跳过绝缘检查；完成后恢复供电并观察十五分钟，确认错误码不再出现，最后把测量值、设备序列号、软件版本和复核人员写入服务记录。"]
+        }
+      ]
     },
     {
       "case_id": "holdout-rotated-manual-001",

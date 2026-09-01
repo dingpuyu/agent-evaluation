@@ -7,6 +7,8 @@
 1. **业务链路 → Prompt A/B**：识别可干预节点，使用脱敏生产型样本对 Baseline/Candidate 做隔离回放，比较任务成功、安全、引用和延迟。
 2. **Bad Case → 证据诊断**：Pi Agent Harness 读取人工期望、历史复测、当前只读 Replay 和 Query Trace，生成必须人工审核的根因与优化假设。
 
+v0.6 新增第三条已跑通闭环：**真实 Document → Retrieval 单变量实验**。同一 Parser 产物只改变 Chunk Profile，再让两组 chunks 分别经过 `text-embedding-v4 (1024d) → 临时 Milvus HNSW+BM25/RRF → qwen3-rerank`；实验结束强制删除临时 Collection，平台只保存指标和 Rank Trace，不保存上传正文，也不改生产索引。
+
 平台还提供独立的 **Evaluation Studio**：通过项目梳理 Agent 对话补齐目标用户、关键任务、失败成本、可用数据和未知项；再选择范围、检索、答案或发布 Judge 阶段，编辑 Candidate Prompt，并在同一冻结观察集上比较其与确定性 Golden Oracle 的一致率、误放和误拒。
 
 从 v0.4 起，生产形态评测集按 **Development / Holdout / Regression** 三层冻结：Development 用于形成 Prompt 假设，Holdout 在运行前隐藏问题文本，Regression 固化已确认 Bad Case 与安全门禁。实验记录数据版本、SHA-256 快照和所用分层，避免用同一批可见题反复调参造成虚假提升。
@@ -79,7 +81,7 @@ Pilot 是异步运行：创建请求立即返回 `202`，网页和脚本轮询�
 - `GET /api/v1/studio/stages`：读取锁定阶段与可编辑 Judge 阶段。
 - `POST /api/v1/project-workspaces/{id}/stage-experiments`：运行阶段 Prompt Baseline/Candidate 对照。
 - `GET /api/v1/document-quality/catalog`：读取 Document Quality 冻结集、分层状态和实验规则。
-- `POST /api/v1/document-quality/experiments`：以内存中的两组无索引 Artifact 运行单变量对照；只允许 Development。
+- `POST /api/v1/document-quality/experiments`：以内存中的两组无索引 Artifact 运行单变量对照；`execution_stage=retrieval-sandbox` 会调用 RAG 平台的隔离真实检索工具，只允许 Development。
 - `GET /api/v1/document-quality/experiments/{id}`：读取租户隔离的指标、失败层、诊断和晋级建议。
 
 Prompt 与阶段实验均可传 `dataset_split=development|holdout|regression`。推荐晋级顺序是：
@@ -108,9 +110,9 @@ Development 形成假设 → Holdout 盲测 → Regression 发布回归 → 人�
 
 针对扫描 PDF、OCR、洗料和 Chunk/Overlap 的下一条跨项目闭环，见 [文档质量 Agent 评测与优化闭环实施方案](docs/document-quality-agent-evaluation-plan.md)。该 Suite 会把 OCR、Layout、Cleaning、Chunk、Retrieval 和 Agent 分层评测，允许质量工程 Agent 在隔离环境中执行受约束的单变量实验，但不允许自动修改或发布生产索引。
 
-Document Quality Suite 已包含 10 条 Golden，分为 Development/Holdout/Regression，故障注入覆盖 OCR 错字、洗料误删、Chunk 边界、错误证据和低质量文档误发布。评测可以显式选择实际执行层，未运行的 Retrieval/Safety 不会被伪装成通过；Baseline/Candidate 对比器只有在 Candidate 硬门禁通过且没有新增回退时才建议晋级。契约验证见 [Phase A 报告](docs/document-quality-phase-a-report.md)；RAG 平台真实 OCR/清洗/切块 Artifact 的 `400/100 → 700/80` 实验、失败证据和运行边界见 [Phase B 报告](docs/document-quality-phase-b-report.md)。
+Document Quality Suite 已包含 10 条 Golden，分为 Development/Holdout/Regression，故障注入覆盖 OCR 错字、洗料误删、Chunk 边界、错误证据和低质量文档误发布。评测可以显式选择实际执行层，未运行的 Retrieval/Safety 不会被伪装成通过；Baseline/Candidate 对比器只有在 Candidate 硬门禁通过且没有新增回退时才建议晋级。契约验证见 [Phase A 报告](docs/document-quality-phase-a-report.md)；真实 OCR/清洗/切块 Artifact 的 `400/100 → 700/80` 实验见 [Phase B 报告](docs/document-quality-phase-b-report.md)；Qwen、Milvus 与 Rerank 的隔离 Retrieval 对照见 [Phase C 报告](docs/document-quality-phase-c-report.md)。
 
-现在这条闭环已经进入网页工作台：在 RAG 项目分别导出 `400/100` 与 `700/80` 的无索引 Artifact 后，可直接上传到 `/document-quality`。平台强制检查两组 Artifact 的 OCR、Layout、Cleaner 产物完全一致，只允许 Chunk Profile 变化；原始 Blocks/Chunks 仅在请求内存中评测，不写入持久化记录。真实首轮结果为 Development `3/4 → 4/4`、Answer Span Containment `0.75 → 1.00`、Embedding Amplification `1.0734 → 1.0299`，因此结论只是“有资格进入 Holdout”，不是“已得到生产最优参数”。操作和安全边界见 [Document Quality Lab](docs/document-quality-lab.md)。
+现在这条闭环已经进入网页工作台：在 RAG 项目分别导出 `400/100` 与 `700/80` 的无索引 Artifact 后，可直接上传到 `/document-quality`。平台强制检查两组 Artifact 的 OCR、Layout、Cleaner 产物完全一致，只允许 Chunk Profile 变化。真实 Retrieval 结果中，两组 Document Hit@5 和 MRR 都是 `1.0`，但新加的单 Chunk 证据完整率从 `0 → 1.0`，证明“检索到正确文档”仍可能无法回答完整步骤；候选同时保持 Development `3/4 → 4/4`、Answer Span `0.75 → 1.00`、Embedding Amplification `1.0734 → 1.0299`。结论仍只是“有资格进入 Holdout”，不是“已得到生产最优参数”。操作和安全边界见 [Document Quality Lab](docs/document-quality-lab.md)。
 
 命令行导入同一组真实结果：
 

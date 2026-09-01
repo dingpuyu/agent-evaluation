@@ -19,6 +19,7 @@ export interface DocumentRetrievalGolden {
   required_document_ids: string[];
   forbidden_document_ids?: string[];
   required_source_pages?: number[];
+  required_content_spans?: string[];
 }
 
 export interface DocumentQualityCase {
@@ -75,7 +76,18 @@ export interface DocumentChunkArtifact {
 
 export interface DocumentRetrievalArtifact {
   query_id: string;
-  hits: Array<{ document_id: string; source_page?: number; score?: number }>;
+  hits: Array<{
+    document_id: string;
+    chunk_id?: string;
+    content?: string;
+    source_page?: number;
+    source_file?: string;
+    score?: number;
+    fusion_score?: number;
+    rerank_score?: number;
+    pre_rerank_rank?: number;
+    post_rerank_rank?: number;
+  }>;
 }
 
 export interface DocumentPipelineArtifact {
@@ -114,6 +126,8 @@ interface CaseMeasurements {
   retrieval_hits: number;
   reciprocal_rank_sum: number;
   wrong_document_count: number;
+  retrieval_evidence_spans_total: number;
+  retrieval_evidence_spans_contained: number;
   unsafe_publish_count: number;
   character_error_rate?: number;
   embedding_amplification?: number;
@@ -252,6 +266,10 @@ export function evaluateDocumentCase(
     retrieval_hits: 0,
     reciprocal_rank_sum: 0,
     wrong_document_count: 0,
+    retrieval_evidence_spans_total: enabled.has("retrieval")
+      ? (item.retrieval_queries ?? []).reduce((total, query) => total + (query.required_content_spans?.length ?? 0), 0)
+      : 0,
+    retrieval_evidence_spans_contained: 0,
     unsafe_publish_count: enabled.has("safety") && artifact.status !== "ready" && artifact.indexed ? 1 : 0,
     embedding_amplification: enabled.has("chunk") ? embeddingAmplification(artifact.chunks) : undefined,
   };
@@ -327,6 +345,11 @@ export function evaluateDocumentCase(
     measurements.wrong_document_count += wrong;
     const pages = new Set(actual?.hits.filter((hitItem) => golden.required_document_ids.includes(hitItem.document_id)).map((hitItem) => hitItem.source_page) ?? []);
     const pagesPassed = (golden.required_source_pages ?? []).every((page) => pages.has(page));
+    for (const span of golden.required_content_spans ?? []) {
+      const contained = actual?.hits.some((hitItem) => containsIgnoringWhitespace(hitItem.content ?? "", span)) ?? false;
+      if (contained) measurements.retrieval_evidence_spans_contained += 1;
+      checks.push(check({ name: `retrieval_evidence_span:${golden.query_id}:${span.slice(0, 32)}`, layer: "retrieval", hard: true, passed: contained }));
+    }
     checks.push(check({ name: `retrieval_hit:${golden.query_id}`, layer: "retrieval", hard: true, passed: hit }));
     checks.push(check({ name: `retrieval_forbidden:${golden.query_id}`, layer: "retrieval", hard: true, passed: wrong === 0, expected: 0, actual: wrong }));
     checks.push(check({ name: `retrieval_source_page:${golden.query_id}`, layer: "retrieval", hard: true, passed: pagesPassed }));
@@ -376,6 +399,7 @@ export function evaluateDocumentQuality(
     noise_total: 0, noise_removed: 0, spans_total: 0, spans_contained: 0,
     retrieval_total: 0, retrieval_hits: 0, reciprocal_rank_sum: 0,
     wrong_document_count: 0, unsafe_publish_count: 0,
+    retrieval_evidence_spans_total: 0, retrieval_evidence_spans_contained: 0,
   });
   const cerValues = results.map((item) => item.measurements.character_error_rate).filter((value): value is number => value !== undefined);
   const amplificationValues = results.map((item) => item.measurements.embedding_amplification).filter((value): value is number => value !== undefined);
@@ -394,6 +418,7 @@ export function evaluateDocumentQuality(
     metrics.push(gate("retrieval_hit_at_5", ratio(sums.retrieval_hits, sums.retrieval_total), ">=", 0.90, true));
     metrics.push(gate("retrieval_mrr", ratio(sums.reciprocal_rank_sum, sums.retrieval_total), ">=", 0.80, true));
     metrics.push(gate("wrong_document_count", sums.wrong_document_count, "=", 0, true));
+    metrics.push(gate("retrieval_evidence_span_containment", ratio(sums.retrieval_evidence_spans_contained, sums.retrieval_evidence_spans_total), ">=", 1, true));
   }
   if (enabled.has("safety")) metrics.push(gate("unsafe_publish_count", sums.unsafe_publish_count, "=", 0, true));
   if (cerValues.length) metrics.push(gate("mean_character_error_rate", cerValues.reduce((sum, value) => sum + value, 0) / cerValues.length, "<=", 0.03, true));

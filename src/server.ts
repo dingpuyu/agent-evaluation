@@ -6,7 +6,12 @@ import { RaglabAdapter, UpstreamError } from "./adapters/raglab.js";
 import { loadConfig } from "./config.js";
 import type { DatasetSplit, Identity } from "./contracts.js";
 import { DATASET_SPLITS, datasetForSplit, datasetSplitSummary, loadDataset, publicDatasetView } from "./dataset.js";
-import { DOCUMENT_PREINDEX_LAYERS, runDocumentQualityExperiment } from "./document-quality-platform.js";
+import {
+  completeDocumentQualityRetrievalExperiment,
+  DOCUMENT_RETRIEVAL_LAYERS,
+  prepareDocumentQualityRetrievalExperiment,
+  runDocumentQualityExperiment,
+} from "./document-quality-platform.js";
 import { loadDocumentQualityDataset } from "./document-quality.js";
 import { runPromptExperiment } from "./experiment.js";
 import { buildEvaluationPlan, comparePilotRuns, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
@@ -79,7 +84,7 @@ async function adminContext(request: IncomingMessage): Promise<{ identity: Ident
 
 async function serveStatic(pathname: string, response: ServerResponse): Promise<boolean> {
   const requested = pathname === "/" ? "index.html" : pathname === "/studio" ? "studio.html" : pathname === "/document-quality" ? "document-quality.html" : pathname.slice(1);
-  if (!/^(index\.html|app\.js|styles\.css|comparison\.css|platform\.css|studio\.html|studio\.js|studio\.css|document-quality\.html|document-quality\.js|document-quality\.css)$/.test(requested)) return false;
+  if (!/^(index\.html|app\.js|styles\.css|comparison\.css|platform\.css|studio\.html|studio\.js|studio\.css|document-quality\.html|document-quality\.js|document-quality\.css|retrieval-sandbox\.css)$/.test(requested)) return false;
   try {
     const body = await readFile(join(publicDir, requested));
     const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" }[extname(requested)] ?? "application/octet-stream";
@@ -102,7 +107,7 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/healthz") {
       writeJSON(response, 200, {
         status: "ok",
-        version: "0.5.0",
+        version: "0.6.0",
         runtime: "pi-agent-core",
         model: config.model,
         model_configured: Boolean(config.modelApiKey),
@@ -119,7 +124,7 @@ const server = createServer(async (request, response) => {
         suites: [
           { id: RAG_BAD_CASE_SUITE_ID, version: RAG_BAD_CASE_SUITE_VERSION, name: "RAG Bad Case Evidence Diagnosis", dimensions: ["task", "tool_use", "retrieval", "grounding", "safety", "observability", "performance"] },
           { id: "raglab.medical-sales.prompt-ab.v1", version: "1.0.0", name: "Medical Sales Agent Prompt A/B", dimensions: ["task", "grounding", "safety", "performance"] },
-          { id: documentQualityDataset.suite_id, version: documentQualityDataset.version, name: "Document Pipeline Quality", dimensions: [...DOCUMENT_PREINDEX_LAYERS] },
+          { id: documentQualityDataset.suite_id, version: documentQualityDataset.version, name: "Document-to-Retrieval Quality", dimensions: [...DOCUMENT_RETRIEVAL_LAYERS] },
         ],
         datasets: [{ id: dataset.dataset_id, name: dataset.name, version: dataset.version, snapshot_id: dataset.snapshot_id, provenance: dataset.provenance, cases: dataset.cases.length, splits: datasetSplitSummary(dataset) }],
       });
@@ -174,13 +179,14 @@ const server = createServer(async (request, response) => {
             interactive_access: name === "development" ? "enabled" : "locked",
           }])),
         },
-        evaluated_layers: [...DOCUMENT_PREINDEX_LAYERS],
+        evaluated_layers: [...DOCUMENT_RETRIEVAL_LAYERS],
         pipeline: ["OCR", "Layout", "Cleaner", "Chunk", "Retrieval"],
-        current_stage: "pre-index",
+        current_stage: "retrieval-sandbox",
         guardrails: [
           "Development 可反复调参；Holdout 和 Regression 不向交互实验暴露",
           "Baseline 与 Candidate 必须拥有相同的 OCR、版面和清洗产物",
           "原始 Blocks/Chunks 仅在内存评测，持久化记录只保留必要的 Golden 检查摘要",
+          "Retrieval 使用服务端生成的临时 Milvus Collection，Qwen/Milvus/Rerank 完成后必须清理",
           "Development 通过只代表可申请盲测，不代表可直接发布生产",
         ],
         experiments: await store.listDocumentQualityExperiments(identity, 20),
@@ -201,9 +207,31 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/v1/document-quality/experiments") {
-      const { identity } = await adminContext(request);
+      const { identity, adapter } = await adminContext(request);
       const body = await readJSON(request, 2 * 1024 * 1024);
       try {
+        if (body.execution_stage === "retrieval-sandbox") {
+          const dataset = await loadDocumentQualityDataset(config.documentQualityDatasetPath);
+          const prepared = prepareDocumentQualityRetrievalExperiment({
+            dataset,
+            split: body.dataset_split,
+            intervention: body.intervention,
+            baseline_artifacts: body.baseline_artifacts,
+            candidate_artifacts: body.candidate_artifacts,
+          });
+          const baselineRetrieval = await adapter.runDocumentRetrievalSandbox(prepared.baseline_request);
+          const candidateRetrieval = await adapter.runDocumentRetrievalSandbox(prepared.candidate_request);
+          const experiment = completeDocumentQualityRetrievalExperiment({
+            identity,
+            dataset,
+            prepared,
+            baseline_retrieval: baselineRetrieval,
+            candidate_retrieval: candidateRetrieval,
+          });
+          await store.saveDocumentQualityExperiment(experiment);
+          writeJSON(response, 201, experiment);
+          return;
+        }
         const experiment = runDocumentQualityExperiment({
           identity,
           dataset: await loadDocumentQualityDataset(config.documentQualityDatasetPath),
@@ -216,6 +244,7 @@ const server = createServer(async (request, response) => {
         await store.saveDocumentQualityExperiment(experiment);
         writeJSON(response, 201, experiment);
       } catch (error) {
+        if (error instanceof UpstreamError) throw error;
         throw new UpstreamError(400, error instanceof Error ? error.message : "invalid document quality experiment");
       }
       return;

@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Document Quality Lab — OCR、版面、清洗与 Chunk 的冻结数据集对照实验">
+  <meta name="description" content="Document Quality Lab — OCR、版面、清洗、Chunk 与真实 Retrieval 的冻结数据集对照实验">
   <title>Document Quality Lab</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/document-quality.css">
+  <link rel="stylesheet" href="/retrieval-sandbox.css">
 </head>
 <body class="dq-body">
   <header class="dq-topbar">
@@ -19,9 +20,9 @@
   <main class="dq-main">
     <section class="dq-hero">
       <div>
-        <p class="eyebrow">PRE-INDEX QUALITY ENGINEERING</p>
+        <p class="eyebrow">DOCUMENT → RETRIEVAL QUALITY ENGINEERING</p>
         <h1>不是“调一个 Chunk 值”，<br>而是完成一次<em>可复现的工程实验。</em></h1>
-        <p>同一份冻结 Development 数据、同一份 OCR / Layout / Cleaner 产物，只改变一个 Chunk Profile。平台计算硬门禁、定位失败层，并明确是否有资格进入盲测。</p>
+        <p>同一份冻结 Development 数据、同一份 OCR / Layout / Cleaner 产物，只改变一个 Chunk Profile；随后走相同的 Qwen Embedding、Milvus Hybrid Search 与 Qwen Rerank，验证改动是否真正改善证据检索。</p>
       </div>
       <article class="dq-snapshot"><small>FROZEN DATASET</small><b id="datasetName">加载中…</b><code id="datasetSnapshot">—</code><span id="datasetCases">—</span></article>
     </section>
@@ -52,7 +53,7 @@
           <label><span>Candidate Profile</span><input id="candidateLabel" value="700/80" maxlength="120"></label>
           <label class="wide"><span>实验假设</span><input id="rationale" value="增大窗口、降低 overlap，验证能否保持完整答案单元并减少重复向量成本" maxlength="500"></label>
         </div>
-        <footer><p>服务端会校验用例全集、单变量条件和未索引状态。Development 通过只允许申请 Holdout，不会修改 RAG 生产配置。</p><button id="runExperiment" disabled>运行 Development 对照</button></footer>
+        <footer><p>服务端会校验用例全集和单变量条件，为两组产物创建独立临时 Milvus Collection；完成或失败均自动清理，不会修改 RAG 生产索引。</p><button id="runExperiment" disabled>运行真实 Retrieval 对照</button></footer>
       </section>
 
       <aside class="dq-card policy-card">
@@ -61,7 +62,7 @@
         <div class="promotion-ladder">
           <span class="done">Development</span><i>→</i><span>Holdout</span><i>→</i><span>Regression</span><i>→</i><span>Release</span>
         </div>
-        <p>当前平台实现到 <b>Development</b>。盲测与发布门禁保持锁定，防止把评测集当训练集使用。</p>
+        <p>当前平台实现到 <b>Development Retrieval</b>。盲测与发布门禁保持锁定，防止把评测集当训练集使用。</p>
       </aside>
     </div>
 

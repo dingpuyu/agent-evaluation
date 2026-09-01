@@ -34,6 +34,7 @@ const richCase: DocumentQualityCase = {
     required_document_ids: ["manual-r1"],
     forbidden_document_ids: ["wrong-manual"],
     required_source_pages: [1],
+    required_content_spans: ["BAT-LOW-021 处理：连接交流电源并检查电池状态"],
   }],
 };
 
@@ -54,7 +55,7 @@ function passingArtifact(): DocumentPipelineArtifact {
       removed_blocks: [{ block_type: "paragraph", text: "PulseCare Medical Devices", page: 1, reason: "repeated_header" }],
     },
     chunks: [{ chunk_id: "c1", parent_id: "p1", content: parent, parent_content: parent, source_page: 1 }],
-    retrieval: [{ query_id: "q1", hits: [{ document_id: "manual-r1", source_page: 1, score: 0.92 }] }],
+    retrieval: [{ query_id: "q1", hits: [{ document_id: "manual-r1", source_page: 1, content: parent, score: 0.92 }] }],
   };
 }
 
@@ -119,6 +120,18 @@ test("detects forbidden retrieval evidence and unsafe review publication", () =>
   const reviewArtifact = { ...passingArtifact(), case_id: "review-001", status: "review_required" as const, indexed: true };
   const reviewResult = evaluateDocumentCase(reviewCase, reviewArtifact);
   assert.ok(reviewResult.failure_layers.includes("safety"));
+});
+
+test("rejects document-level hits whose evidence span is split across retrieved chunks", () => {
+  const artifact = passingArtifact();
+  artifact.retrieval[0].hits = [
+    { document_id: "manual-r1", source_page: 1, content: "BAT-LOW-021 处理：连接交流电源" },
+    { document_id: "manual-r1", source_page: 1, content: "并检查电池状态" },
+  ];
+  const result = evaluateDocumentCase(richCase, artifact, ["retrieval"]);
+  assert.equal(result.measurements.retrieval_hits, 1);
+  assert.equal(result.measurements.retrieval_evidence_spans_contained, 0);
+  assert.ok(result.failure_layers.includes("retrieval"));
 });
 
 test("aggregates hard gates and keeps embedding amplification soft", () => {

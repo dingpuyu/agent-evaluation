@@ -48,6 +48,7 @@ def main() -> None:
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--rationale", default="增大窗口、降低 overlap，验证能否保持完整答案单元并减少重复向量成本")
+    parser.add_argument("--stage", choices=("pre-index", "retrieval-sandbox"), default="retrieval-sandbox")
     args = parser.parse_args()
 
     baseline = load_bundle(args.baseline)
@@ -56,6 +57,7 @@ def main() -> None:
     login = request(base + "/api/v1/session/login", "POST", body={"email": args.email, "password": args.password})
     experiment = request(base + "/api/v1/document-quality/experiments", "POST", login["access_token"], {
         "dataset_split": "development",
+        "execution_stage": args.stage,
         "evaluated_layers": ["ocr", "layout", "cleaning", "chunk"],
         "intervention": {
             "variable": "chunk_profile",
@@ -78,6 +80,9 @@ def main() -> None:
         "root_cause_layer": experiment["diagnosis"]["root_cause_layer"],
         "raw_artifacts_persisted": experiment["raw_artifacts_persisted"],
         "production_mutation": experiment["production_mutation"],
+        "execution_stage": experiment["execution_stage"],
+        "retrieval_provider": (experiment.get("retrieval_sandbox") or {}).get("candidate", {}).get("provider"),
+        "sandbox_cleanup": (experiment.get("retrieval_sandbox") or {}).get("candidate", {}).get("cleanup_completed"),
     }, ensure_ascii=False, indent=2))
 
 

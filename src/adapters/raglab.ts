@@ -1,5 +1,6 @@
 import type { BadCase, DeviceContext, Identity, LoginResult, ReplayResult, RetrievalHit } from "../contracts.js";
 import { retrievalMetrics } from "../metrics.js";
+import type { RetrievalSandboxRequest, RetrievalSandboxRun } from "../document-quality-platform.js";
 
 type FetchLike = typeof fetch;
 
@@ -138,5 +139,12 @@ export class RaglabAdapter {
       method: "POST",
       body: JSON.stringify(input),
     }) as Promise<Record<string, unknown>>;
+  }
+
+  async runDocumentRetrievalSandbox(input: RetrievalSandboxRequest): Promise<RetrievalSandboxRun> {
+    return this.request(this.raglabApiUrl, "/api/v1/evaluation/retrieval-sandbox/runs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }) as Promise<RetrievalSandboxRun>;
   }
 }
