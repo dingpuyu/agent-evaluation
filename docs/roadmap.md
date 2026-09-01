@@ -25,6 +25,7 @@
 - 同一 Dataset 下比较单变量变化。
 - 输出改善、退化、无变化和无法判定案例。
 - 安全硬门禁失败时直接拒绝发布建议。
+- 新增 Document Quality Suite：分层评测 OCR、Layout、Cleaning、Chunk 和 Retrieval，通过隔离 Sandbox 让质量工程 Agent 执行受约束实验，详细方案见 [文档质量 Agent 评测与优化闭环](document-quality-agent-evaluation-plan.md)。
 
 ## Phase 4：多 Agent 平台
 

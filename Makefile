@@ -1,4 +1,4 @@
-.PHONY: install build test deploy-test deploy-init deploy-check deploy-up deploy-verify deploy-status deploy-down up down status smoke studio-smoke split-smoke pilot import-production
+.PHONY: install build test deploy-test deploy-init deploy-check deploy-up deploy-verify deploy-status deploy-down up down status smoke studio-smoke split-smoke pilot document-eval import-production
 
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then echo 'docker-compose'; else echo 'docker compose'; fi)
 EVALUATION_ENV_FILE ?= .env
@@ -61,6 +61,10 @@ split-smoke:
 
 pilot:
 	$(WITH_ENV) python3 scripts/pilot.py
+
+document-eval:
+	@test -n "$${ARTIFACTS}" || (echo "ARTIFACTS=/path/to/document-artifacts.json is required" && exit 1)
+	npm run document-eval -- --artifacts "$${ARTIFACTS}" --split "$${SPLIT:-all}"
 
 import-production:
 	@test -n "$${INPUT}" || (echo "INPUT=/authorized/export.jsonl is required" && exit 1)

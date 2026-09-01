@@ -1,0 +1,159 @@
+{
+  "schema": "agent-evaluation.document-quality.dataset.v1",
+  "suite_id": "raglab.document-quality.v1",
+  "dataset_id": "raglab-document-quality-v1",
+  "version": "1.0.0",
+  "domain": "medical-device-documentation",
+  "language": "zh-CN",
+  "provenance": "synthetic-and-confirmed-ocr-regression",
+  "contains_patient_data": false,
+  "description": "医疗设备文档处理流水线首版冻结集，覆盖 OCR 关键字段、版面顺序、保守洗料、Chunk 边界、来源页和错误型号隔离；全部为合成数据，不用于真实设备操作或临床决策。",
+  "split_policy": {
+    "development": {
+      "purpose": "形成 OCR、Cleaning 与 Chunk 单变量优化假设。",
+      "prompt_visible": true,
+      "case_count": 3
+    },
+    "holdout": {
+      "purpose": "按源文档组隔离的盲测文档，防止针对可见页面过拟合。",
+      "prompt_visible": false,
+      "case_count": 3
+    },
+    "regression": {
+      "purpose": "固化高置信度错字、相似型号误删和低质量文档误发布。",
+      "prompt_visible": true,
+      "case_count": 3
+    }
+  },
+  "cases": [
+    {
+      "case_id": "dev-ocr-aed-critical-001",
+      "split": "development",
+      "source_group": "synthetic-aed-troubleshooting-r1",
+      "input_variant": "scan-200dpi",
+      "expected_status": "ready",
+      "expected_text": "AED 设备故障排查\n型号：BeneHeart C2\n错误码：BAT-LOW-021\nBAT-LOW-021 处理：连接交流电源并检查电池状态",
+      "expected_blocks": [
+        {"type": "heading", "contains": "AED 设备故障排查", "page": 1},
+        {"contains": "BAT-LOW-021", "page": 1}
+      ],
+      "expected_reading_order": ["AED 设备故障排查", "BeneHeart C2", "BAT-LOW-021", "连接交流电源"],
+      "critical_fields": ["BeneHeart C2", "BAT-LOW-021"],
+      "forbidden_normalizations": ["BAT-LOW-O21"],
+      "required_chunk_spans": ["BAT-LOW-021 处理：连接交流电源并检查电池状态"],
+      "retrieval_queries": [
+        {
+          "query_id": "dev-aed-code-query",
+          "query": "BeneHeart C2 的 BAT-LOW-021 如何处理？",
+          "required_document_ids": ["synthetic-aed-troubleshooting-r1"],
+          "forbidden_document_ids": ["synthetic-vsm100-error-codes-r1"],
+          "required_source_pages": [1]
+        }
+      ]
+    },
+    {
+      "case_id": "dev-cleaning-margin-002",
+      "split": "development",
+      "source_group": "synthetic-vsm100-operator-r1",
+      "input_variant": "digital-pdf-repeated-margins",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-100", "SYS-NET-042"],
+      "expected_removed_noise": ["PulseCare Medical Devices", "第 1 页", "第 2 页", "第 3 页"],
+      "protected_text": ["VSM-100", "SYS-NET-042", "请检查网络接口和网关配置"],
+      "required_chunk_spans": ["SYS-NET-042 请检查网络接口和网关配置"]
+    },
+    {
+      "case_id": "dev-table-version-003",
+      "split": "development",
+      "source_group": "synthetic-vsm-compatibility-r1",
+      "input_variant": "xlsx-and-pdf-table",
+      "expected_status": "ready",
+      "expected_blocks": [
+        {"type": "table", "contains": "VSM-100 | 2.6"},
+        {"type": "table", "contains": "VSM-100 Pro | 2.6"}
+      ],
+      "critical_fields": ["VSM-100", "VSM-100 Pro", "2.6"],
+      "protected_text": ["VSM-100 | 2.6", "VSM-100 Pro | 2.6"],
+      "required_chunk_spans": ["VSM-100 Pro | 2.6 | HR-2"],
+      "retrieval_queries": [
+        {
+          "query_id": "dev-version-table-query",
+          "query": "VSM-100 Pro 软件 2.6 对应哪个硬件修订？",
+          "required_document_ids": ["synthetic-vsm-compatibility-r1"],
+          "required_source_pages": [2]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-rotated-manual-001",
+      "split": "holdout",
+      "source_group": "synthetic-pump-manual-r1",
+      "input_variant": "scan-rotated-90deg",
+      "expected_status": "ready",
+      "critical_fields": ["BeneFusion uVP", "INF-OCC-017"],
+      "forbidden_normalizations": ["INF-0CC-017"],
+      "expected_reading_order": ["BeneFusion uVP", "INF-OCC-017", "停止输注并检查管路"],
+      "required_chunk_spans": ["INF-OCC-017 停止输注并检查管路"]
+    },
+    {
+      "case_id": "holdout-low-dpi-review-002",
+      "split": "holdout",
+      "source_group": "synthetic-monitor-service-r1",
+      "input_variant": "scan-150dpi-low-contrast",
+      "expected_status": "review_required",
+      "critical_fields": ["BeneVision N1"],
+      "forbidden_normalizations": ["BeneVision NI"]
+    },
+    {
+      "case_id": "holdout-docx-structure-003",
+      "split": "holdout",
+      "source_group": "synthetic-aed-maintenance-r2",
+      "input_variant": "docx-heading-list-table",
+      "expected_status": "ready",
+      "expected_blocks": [
+        {"type": "heading", "text": "维护前检查"},
+        {"type": "list", "contains": "确认设备已退出临床使用"},
+        {"type": "table", "contains": "C2 | 2.6"}
+      ],
+      "critical_fields": ["C2", "2.6", "MAINT-003"],
+      "required_chunk_spans": ["MAINT-003 仅授权服务人员执行"]
+    },
+    {
+      "case_id": "regression-high-confidence-word-001",
+      "split": "regression",
+      "source_group": "confirmed-aed-ocr-badcase-r1",
+      "input_variant": "scan-clean-high-confidence",
+      "expected_status": "ready",
+      "critical_fields": ["授权服务人员"],
+      "forbidden_normalizations": ["授权服务员"],
+      "protected_text": ["授权服务人员"]
+    },
+    {
+      "case_id": "regression-similar-model-dedup-002",
+      "split": "regression",
+      "source_group": "confirmed-similar-model-cleaning-r1",
+      "input_variant": "digital-pdf-similar-paragraphs",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-100", "VSM-100 Pro"],
+      "protected_text": ["VSM-100 支持标准网络模块", "VSM-100 Pro 支持增强网络模块"],
+      "retrieval_queries": [
+        {
+          "query_id": "regression-pro-network-query",
+          "query": "VSM-100 Pro 的网络模块是什么？",
+          "required_document_ids": ["confirmed-vsm100-pro-network-r1"],
+          "forbidden_document_ids": ["confirmed-vsm100-network-r1"],
+          "required_source_pages": [2]
+        }
+      ]
+    },
+    {
+      "case_id": "regression-review-publish-003",
+      "split": "regression",
+      "source_group": "confirmed-low-quality-publish-r1",
+      "input_variant": "scan-watermark-low-confidence",
+      "expected_status": "review_required",
+      "critical_fields": ["LOT-A2407"],
+      "forbidden_normalizations": ["LOT-AZ407"]
+    }
+  ]
+}

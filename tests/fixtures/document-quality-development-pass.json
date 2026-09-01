@@ -1,0 +1,94 @@
+{
+  "schema": "agent-evaluation.document-quality.artifacts.v1",
+  "provenance": "contract-fixture-not-a-model-baseline",
+  "artifacts": [
+    {
+      "schema": "agent-evaluation.document-quality.artifact.v1",
+      "case_id": "dev-ocr-aed-critical-001",
+      "status": "ready",
+      "indexed": true,
+      "config_fingerprint": "contract-fixture:document-ir-v3:700-80",
+      "blocks": [
+        {"block_type": "heading", "text": "AED 设备故障排查", "page": 1, "confidence": 0.99},
+        {"block_type": "paragraph", "text": "型号：BeneHeart C2", "page": 1, "confidence": 0.99},
+        {"block_type": "paragraph", "text": "错误码：BAT-LOW-021", "page": 1, "confidence": 0.98},
+        {"block_type": "paragraph", "text": "BAT-LOW-021 处理：连接交流电源并检查电池状态", "page": 1, "confidence": 0.97}
+      ],
+      "cleaning": {"removed_blocks": []},
+      "chunks": [
+        {
+          "chunk_id": "aed#c001",
+          "parent_id": "aed#p001",
+          "content": "BAT-LOW-021 处理：连接交流电源并检查电池状态",
+          "parent_content": "BAT-LOW-021 处理：连接交流电源并检查电池状态",
+          "source_page": 1
+        }
+      ],
+      "retrieval": [
+        {
+          "query_id": "dev-aed-code-query",
+          "hits": [{"document_id": "synthetic-aed-troubleshooting-r1", "source_page": 1, "score": 0.95}]
+        }
+      ]
+    },
+    {
+      "schema": "agent-evaluation.document-quality.artifact.v1",
+      "case_id": "dev-cleaning-margin-002",
+      "status": "ready",
+      "indexed": true,
+      "config_fingerprint": "contract-fixture:document-ir-v3:700-80",
+      "blocks": [
+        {"block_type": "heading", "text": "VSM-100 运维手册", "page": 1},
+        {"block_type": "paragraph", "text": "错误码 SYS-NET-042 请检查网络接口和网关配置", "page": 2}
+      ],
+      "cleaning": {
+        "removed_blocks": [
+          {"block_type": "paragraph", "text": "PulseCare Medical Devices", "page": 1, "reason": "repeated_header"},
+          {"block_type": "paragraph", "text": "第 1 页", "page": 1, "reason": "page_number"},
+          {"block_type": "paragraph", "text": "第 2 页", "page": 2, "reason": "page_number"},
+          {"block_type": "paragraph", "text": "第 3 页", "page": 3, "reason": "page_number"}
+        ]
+      },
+      "chunks": [
+        {
+          "chunk_id": "vsm#c001",
+          "parent_id": "vsm#p001",
+          "content": "SYS-NET-042 请检查网络接口和网关配置",
+          "parent_content": "SYS-NET-042 请检查网络接口和网关配置",
+          "source_page": 2
+        }
+      ],
+      "retrieval": []
+    },
+    {
+      "schema": "agent-evaluation.document-quality.artifact.v1",
+      "case_id": "dev-table-version-003",
+      "status": "ready",
+      "indexed": true,
+      "config_fingerprint": "contract-fixture:document-ir-v3:700-80",
+      "blocks": [
+        {
+          "block_type": "table",
+          "text": "型号 | 软件版本 | 硬件修订\nVSM-100 | 2.6 | HR-1\nVSM-100 Pro | 2.6 | HR-2",
+          "page": 2
+        }
+      ],
+      "cleaning": {"removed_blocks": []},
+      "chunks": [
+        {
+          "chunk_id": "matrix#c001",
+          "parent_id": "matrix#p001",
+          "content": "VSM-100 Pro | 2.6 | HR-2",
+          "parent_content": "VSM-100 Pro | 2.6 | HR-2",
+          "source_page": 2
+        }
+      ],
+      "retrieval": [
+        {
+          "query_id": "dev-version-table-query",
+          "hits": [{"document_id": "synthetic-vsm-compatibility-r1", "source_page": 2, "score": 0.93}]
+        }
+      ]
+    }
+  ]
+}

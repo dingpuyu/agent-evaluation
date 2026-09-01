@@ -7,5 +7,6 @@ dist/
 coverage/
 data/runs/*.json
 data/runs/*.tmp
+data/document-quality/
 *.log
 .deploy/
