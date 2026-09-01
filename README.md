@@ -34,6 +34,8 @@ make status
 
 项目梳理与阶段 Prompt 实验：<http://localhost:18200/studio>
 
+文档质量单变量实验：<http://localhost:18200/document-quality>
+
 默认复用 `DEEPSEEK_API_KEY`。Key 只注入容器，不写入运行记录、数据集或仓库。
 
 ### 在新电脑与 RAG 平台一起部署
@@ -76,6 +78,9 @@ Pilot 是异步运行：创建请求立即返回 `202`，网页和脚本轮询�
 - `POST /api/v1/project-workspaces/{id}/messages`：和 Evaluation Architect Agent 对话并更新项目 Brief。
 - `GET /api/v1/studio/stages`：读取锁定阶段与可编辑 Judge 阶段。
 - `POST /api/v1/project-workspaces/{id}/stage-experiments`：运行阶段 Prompt Baseline/Candidate 对照。
+- `GET /api/v1/document-quality/catalog`：读取 Document Quality 冻结集、分层状态和实验规则。
+- `POST /api/v1/document-quality/experiments`：以内存中的两组无索引 Artifact 运行单变量对照；只允许 Development。
+- `GET /api/v1/document-quality/experiments/{id}`：读取租户隔离的指标、失败层、诊断和晋级建议。
 
 Prompt 与阶段实验均可传 `dataset_split=development|holdout|regression`。推荐晋级顺序是：
 
@@ -104,3 +109,13 @@ Development 形成假设 → Holdout 盲测 → Regression 发布回归 → 人�
 针对扫描 PDF、OCR、洗料和 Chunk/Overlap 的下一条跨项目闭环，见 [文档质量 Agent 评测与优化闭环实施方案](docs/document-quality-agent-evaluation-plan.md)。该 Suite 会把 OCR、Layout、Cleaning、Chunk、Retrieval 和 Agent 分层评测，允许质量工程 Agent 在隔离环境中执行受约束的单变量实验，但不允许自动修改或发布生产索引。
 
 Document Quality Suite 已包含 10 条 Golden，分为 Development/Holdout/Regression，故障注入覆盖 OCR 错字、洗料误删、Chunk 边界、错误证据和低质量文档误发布。评测可以显式选择实际执行层，未运行的 Retrieval/Safety 不会被伪装成通过；Baseline/Candidate 对比器只有在 Candidate 硬门禁通过且没有新增回退时才建议晋级。契约验证见 [Phase A 报告](docs/document-quality-phase-a-report.md)；RAG 平台真实 OCR/清洗/切块 Artifact 的 `400/100 → 700/80` 实验、失败证据和运行边界见 [Phase B 报告](docs/document-quality-phase-b-report.md)。
+
+现在这条闭环已经进入网页工作台：在 RAG 项目分别导出 `400/100` 与 `700/80` 的无索引 Artifact 后，可直接上传到 `/document-quality`。平台强制检查两组 Artifact 的 OCR、Layout、Cleaner 产物完全一致，只允许 Chunk Profile 变化；原始 Blocks/Chunks 仅在请求内存中评测，不写入持久化记录。真实首轮结果为 Development `3/4 → 4/4`、Answer Span Containment `0.75 → 1.00`、Embedding Amplification `1.0734 → 1.0299`，因此结论只是“有资格进入 Holdout”，不是“已得到生产最优参数”。操作和安全边界见 [Document Quality Lab](docs/document-quality-lab.md)。
+
+命令行导入同一组真实结果：
+
+```bash
+BASELINE=data/document-quality/artifacts-400-100.json \
+CANDIDATE=data/document-quality/artifacts-700-80.json \
+make document-quality-import
+```

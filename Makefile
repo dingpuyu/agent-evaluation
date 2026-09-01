@@ -1,4 +1,4 @@
-.PHONY: install build test deploy-test deploy-init deploy-check deploy-up deploy-verify deploy-status deploy-down up down status smoke studio-smoke split-smoke pilot document-eval document-compare import-production
+.PHONY: install build test deploy-test deploy-init deploy-check deploy-up deploy-verify deploy-status deploy-down up down status smoke studio-smoke split-smoke document-quality-smoke document-quality-import pilot document-eval document-compare import-production
 
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then echo 'docker-compose'; else echo 'docker compose'; fi)
 EVALUATION_ENV_FILE ?= .env
@@ -33,6 +33,7 @@ deploy-verify:
 	$(WITH_ENV) python3 scripts/smoke.py
 	$(WITH_ENV) python3 scripts/studio_smoke.py
 	$(WITH_ENV) python3 scripts/split_smoke.py
+	$(WITH_ENV) python3 scripts/document_quality_smoke.py
 
 deploy-status:
 	$(WITH_ENV) $(COMPOSE) ps
@@ -58,6 +59,14 @@ studio-smoke:
 
 split-smoke:
 	$(WITH_ENV) python3 scripts/split_smoke.py
+
+document-quality-smoke:
+	$(WITH_ENV) python3 scripts/document_quality_smoke.py
+
+document-quality-import:
+	@test -n "$${BASELINE}" || (echo "BASELINE=/path/to/baseline-artifacts.json is required" && exit 1)
+	@test -n "$${CANDIDATE}" || (echo "CANDIDATE=/path/to/candidate-artifacts.json is required" && exit 1)
+	$(WITH_ENV) python3 scripts/import_document_quality_experiment.py --baseline "$${BASELINE}" --candidate "$${CANDIDATE}"
 
 pilot:
 	$(WITH_ENV) python3 scripts/pilot.py

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Document Quality Lab — OCR、版面、清洗与 Chunk 的冻结数据集对照实验">
+  <title>Document Quality Lab</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/document-quality.css">
+</head>
+<body class="dq-body">
+  <header class="dq-topbar">
+    <a class="brand" href="/document-quality"><span>DQ</span><div><b>Document Quality Lab</b><small>Artifacts → Metrics → Decision</small></div></a>
+    <nav><a href="/">质量总览</a><a href="/studio">项目梳理</a><a class="active" href="/document-quality">文档质量</a></nav>
+    <div class="dq-health"><i id="healthDot"></i><span id="healthText">连接中…</span></div>
+    <div class="dq-identity" id="identityBox"><small>尚未登录</small></div>
+  </header>
+
+  <main class="dq-main">
+    <section class="dq-hero">
+      <div>
+        <p class="eyebrow">PRE-INDEX QUALITY ENGINEERING</p>
+        <h1>不是“调一个 Chunk 值”，<br>而是完成一次<em>可复现的工程实验。</em></h1>
+        <p>同一份冻结 Development 数据、同一份 OCR / Layout / Cleaner 产物，只改变一个 Chunk Profile。平台计算硬门禁、定位失败层，并明确是否有资格进入盲测。</p>
+      </div>
+      <article class="dq-snapshot"><small>FROZEN DATASET</small><b id="datasetName">加载中…</b><code id="datasetSnapshot">—</code><span id="datasetCases">—</span></article>
+    </section>
+
+    <section class="dq-pipeline" id="pipeline"></section>
+
+    <div class="dq-workbench">
+      <section class="dq-card experiment-card">
+        <header><div><p class="eyebrow">01 / SINGLE-VARIABLE EXPERIMENT</p><h2>上传 Pipeline Artifact</h2></div><span class="dq-chip safe">RAW NOT PERSISTED</span></header>
+        <div class="dq-split-lock">
+          <div class="enabled"><small>DEVELOPMENT</small><b>可调试</b><span>4 条公开问题 · 可反复运行</span></div>
+          <div><small>HOLDOUT</small><b>已锁定</b><span>问题与期望不暴露</span></div>
+          <div><small>REGRESSION</small><b>已锁定</b><span>仅发布门禁使用</span></div>
+        </div>
+        <div class="artifact-grid">
+          <label class="artifact-drop baseline">
+            <span>BASELINE</span><b id="baselineName">选择 artifact-bundle.json</b><small id="baselineMeta">例如 400/100 · 当前策略</small>
+            <input id="baselineFile" type="file" accept="application/json,.json">
+          </label>
+          <div class="versus">VS</div>
+          <label class="artifact-drop candidate">
+            <span>CANDIDATE</span><b id="candidateName">选择 artifact-bundle.json</b><small id="candidateMeta">例如 700/80 · 候选策略</small>
+            <input id="candidateFile" type="file" accept="application/json,.json">
+          </label>
+        </div>
+        <div class="intervention-form">
+          <label><span>Baseline Profile</span><input id="baselineLabel" value="400/100" maxlength="120"></label>
+          <label><span>Candidate Profile</span><input id="candidateLabel" value="700/80" maxlength="120"></label>
+          <label class="wide"><span>实验假设</span><input id="rationale" value="增大窗口、降低 overlap，验证能否保持完整答案单元并减少重复向量成本" maxlength="500"></label>
+        </div>
+        <footer><p>服务端会校验用例全集、单变量条件和未索引状态。Development 通过只允许申请 Holdout，不会修改 RAG 生产配置。</p><button id="runExperiment" disabled>运行 Development 对照</button></footer>
+      </section>
+
+      <aside class="dq-card policy-card">
+        <header><p class="eyebrow">02 / QUALITY POLICY</p><h2>不可绕过的实验规则</h2></header>
+        <ol id="guardrails"><li>加载中…</li></ol>
+        <div class="promotion-ladder">
+          <span class="done">Development</span><i>→</i><span>Holdout</span><i>→</i><span>Regression</span><i>→</i><span>Release</span>
+        </div>
+        <p>当前平台实现到 <b>Development</b>。盲测与发布门禁保持锁定，防止把评测集当训练集使用。</p>
+      </aside>
+    </div>
+
+    <section class="dq-card result-card" id="resultSection">
+      <header><div><p class="eyebrow">03 / EVIDENCE & DECISION</p><h2>对照结果</h2></div><span class="dq-chip" id="resultStatus">WAITING</span></header>
+      <div id="result"><div class="dq-empty">上传同一次导出的 Baseline 与 Candidate Artifact，运行后查看指标、失败层和准入结论。</div></div>
+    </section>
+
+    <section class="dq-card history-card">
+      <header><div><p class="eyebrow">04 / AUDIT HISTORY</p><h2>文档质量实验记录</h2><p>记录数据快照、参数、指标与诊断；不记录上传的原始 Blocks 和 Chunks。</p></div></header>
+      <div id="history"><div class="dq-empty">尚无实验记录</div></div>
+    </section>
+  </main>
+
+  <div class="login-layer" id="loginLayer">
+    <form class="login-card" id="loginForm">
+      <span class="login-mark">DQ</span><p class="eyebrow">AUTHORIZED QUALITY LAB</p><h2>进入文档质量工作台</h2>
+      <p>使用 RAG Evolution Lab 管理员身份。令牌只保存在当前浏览器；Artifact 原始 Blocks/Chunks 不会写入评测记录。</p>
+      <label>邮箱<input id="email" type="email" value="alice@tenant-a.local" autocomplete="username" required></label>
+      <label>密码<input id="password" type="password" value="RagLab-Alice-2026!" autocomplete="current-password" required></label>
+      <button type="submit">登录并加载冻结数据集</button><small id="loginError"></small>
+    </form>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/document-quality.js"></script>
+</body>
+</html>

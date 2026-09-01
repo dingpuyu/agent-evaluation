@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { EvaluationRun, PilotRun, ProjectWorkspace, StagePromptExperiment } from "../src/contracts.js";
+import type { DocumentQualityExperiment } from "../src/document-quality-platform.js";
 import { RunStore } from "../src/store.js";
 
 test("persists runs and preserves tenant isolation", async () => {
@@ -31,5 +32,10 @@ test("persists runs and preserves tenant isolation", async () => {
     await store.saveStageExperiment(stageExperiment);
     assert.equal((await store.listStageExperiments({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] }, workspace.workspace_id)).length, 1);
     assert.equal((await store.listStageExperiments({ subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }, workspace.workspace_id)).length, 0);
+
+    const documentExperiment = { experiment_id: `docqexp_${"e".repeat(32)}`, tenant_id: "tenant_a", started_at: new Date().toISOString() } as DocumentQualityExperiment;
+    await store.saveDocumentQualityExperiment(documentExperiment);
+    assert.equal((await store.listDocumentQualityExperiments({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] })).length, 1);
+    assert.equal(await store.getDocumentQualityExperiment(documentExperiment.experiment_id, { subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }), undefined);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

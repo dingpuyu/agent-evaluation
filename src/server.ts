@@ -6,6 +6,8 @@ import { RaglabAdapter, UpstreamError } from "./adapters/raglab.js";
 import { loadConfig } from "./config.js";
 import type { DatasetSplit, Identity } from "./contracts.js";
 import { DATASET_SPLITS, datasetForSplit, datasetSplitSummary, loadDataset, publicDatasetView } from "./dataset.js";
+import { DOCUMENT_PREINDEX_LAYERS, runDocumentQualityExperiment } from "./document-quality-platform.js";
+import { loadDocumentQualityDataset } from "./document-quality.js";
 import { runPromptExperiment } from "./experiment.js";
 import { buildEvaluationPlan, comparePilotRuns, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
 import { evaluateRagBadCase, RAG_BAD_CASE_SUITE_ID, RAG_BAD_CASE_SUITE_VERSION } from "./runner.js";
@@ -34,13 +36,13 @@ function writeJSON(response: ServerResponse, status: number, value: unknown) {
   response.end(JSON.stringify(value));
 }
 
-async function readJSON(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJSON(request: IncomingMessage, maxBytes = 64 * 1024): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.from(chunk);
     size += buffer.length;
-    if (size > 64 * 1024) throw new UpstreamError(413, "request body is too large");
+    if (size > maxBytes) throw new UpstreamError(413, "request body is too large");
     chunks.push(buffer);
   }
   if (!chunks.length) return {};
@@ -76,8 +78,8 @@ async function adminContext(request: IncomingMessage): Promise<{ identity: Ident
 }
 
 async function serveStatic(pathname: string, response: ServerResponse): Promise<boolean> {
-  const requested = pathname === "/" ? "index.html" : pathname === "/studio" ? "studio.html" : pathname.slice(1);
-  if (!/^(index\.html|app\.js|styles\.css|comparison\.css|platform\.css|studio\.html|studio\.js|studio\.css)$/.test(requested)) return false;
+  const requested = pathname === "/" ? "index.html" : pathname === "/studio" ? "studio.html" : pathname === "/document-quality" ? "document-quality.html" : pathname.slice(1);
+  if (!/^(index\.html|app\.js|styles\.css|comparison\.css|platform\.css|studio\.html|studio\.js|studio\.css|document-quality\.html|document-quality\.js|document-quality\.css)$/.test(requested)) return false;
   try {
     const body = await readFile(join(publicDir, requested));
     const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" }[extname(requested)] ?? "application/octet-stream";
@@ -100,7 +102,7 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/healthz") {
       writeJSON(response, 200, {
         status: "ok",
-        version: "0.4.0",
+        version: "0.5.0",
         runtime: "pi-agent-core",
         model: config.model,
         model_configured: Boolean(config.modelApiKey),
@@ -111,11 +113,13 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/v1/catalog") {
       const dataset = await loadDataset(config.datasetPath);
+      const documentQualityDataset = await loadDocumentQualityDataset(config.documentQualityDatasetPath);
       writeJSON(response, 200, {
         targets: [{ id: RAGLAB_TARGET.target_id, name: RAGLAB_TARGET.name, type: RAGLAB_TARGET.target_type, capabilities: RAGLAB_TARGET.capabilities }],
         suites: [
           { id: RAG_BAD_CASE_SUITE_ID, version: RAG_BAD_CASE_SUITE_VERSION, name: "RAG Bad Case Evidence Diagnosis", dimensions: ["task", "tool_use", "retrieval", "grounding", "safety", "observability", "performance"] },
           { id: "raglab.medical-sales.prompt-ab.v1", version: "1.0.0", name: "Medical Sales Agent Prompt A/B", dimensions: ["task", "grounding", "safety", "performance"] },
+          { id: documentQualityDataset.suite_id, version: documentQualityDataset.version, name: "Document Pipeline Quality", dimensions: [...DOCUMENT_PREINDEX_LAYERS] },
         ],
         datasets: [{ id: dataset.dataset_id, name: dataset.name, version: dataset.version, snapshot_id: dataset.snapshot_id, provenance: dataset.provenance, cases: dataset.cases.length, splits: datasetSplitSummary(dataset) }],
       });
@@ -148,6 +152,72 @@ const server = createServer(async (request, response) => {
       const dataset = await loadDataset(config.datasetPath);
       const plan = buildEvaluationPlan(await adapter.getEvaluationContract(), dataset);
       writeJSON(response, 200, platformOverview({ plans: [plan], pilotRuns: await store.listPilots(identity) }));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/document-quality/catalog") {
+      const { identity } = await adminContext(request);
+      const dataset = await loadDocumentQualityDataset(config.documentQualityDatasetPath);
+      writeJSON(response, 200, {
+        suite_id: dataset.suite_id,
+        dataset: {
+          id: dataset.dataset_id,
+          version: dataset.version,
+          snapshot: dataset.snapshot_id,
+          provenance: dataset.provenance,
+          description: dataset.description,
+          contains_patient_data: dataset.contains_patient_data,
+          cases: dataset.cases.length,
+          splits: Object.fromEntries(Object.entries(dataset.split_policy).map(([name, policy]) => [name, {
+            purpose: policy.purpose,
+            case_count: policy.case_count,
+            prompt_visible: policy.prompt_visible,
+            interactive_access: name === "development" ? "enabled" : "locked",
+          }])),
+        },
+        evaluated_layers: [...DOCUMENT_PREINDEX_LAYERS],
+        pipeline: ["OCR", "Layout", "Cleaner", "Chunk", "Retrieval"],
+        current_stage: "pre-index",
+        guardrails: [
+          "Development 可反复调参；Holdout 和 Regression 不向交互实验暴露",
+          "Baseline 与 Candidate 必须拥有相同的 OCR、版面和清洗产物",
+          "原始 Blocks/Chunks 仅在内存评测，持久化记录只保留必要的 Golden 检查摘要",
+          "Development 通过只代表可申请盲测，不代表可直接发布生产",
+        ],
+        experiments: await store.listDocumentQualityExperiments(identity, 20),
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/v1/document-quality/experiments") {
+      const { identity } = await adminContext(request);
+      writeJSON(response, 200, { experiments: await store.listDocumentQualityExperiments(identity, Number.parseInt(url.searchParams.get("limit") ?? "30", 10)) });
+      return;
+    }
+    const documentQualityMatch = url.pathname.match(/^\/api\/v1\/document-quality\/experiments\/(docqexp_[a-f0-9]{32})$/);
+    if (request.method === "GET" && documentQualityMatch?.[1]) {
+      const { identity } = await adminContext(request);
+      const experiment = await store.getDocumentQualityExperiment(documentQualityMatch[1], identity);
+      if (!experiment) throw new UpstreamError(404, "document quality experiment was not found or is not accessible");
+      writeJSON(response, 200, experiment);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/v1/document-quality/experiments") {
+      const { identity } = await adminContext(request);
+      const body = await readJSON(request, 2 * 1024 * 1024);
+      try {
+        const experiment = runDocumentQualityExperiment({
+          identity,
+          dataset: await loadDocumentQualityDataset(config.documentQualityDatasetPath),
+          split: body.dataset_split,
+          evaluated_layers: body.evaluated_layers,
+          intervention: body.intervention,
+          baseline_artifacts: body.baseline_artifacts,
+          candidate_artifacts: body.candidate_artifacts,
+        });
+        await store.saveDocumentQualityExperiment(experiment);
+        writeJSON(response, 201, experiment);
+      } catch (error) {
+        throw new UpstreamError(400, error instanceof Error ? error.message : "invalid document quality experiment");
+      }
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/v1/studio/stages") {

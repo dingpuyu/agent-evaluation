@@ -11,14 +11,15 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production AGENT_EVALUATION_HOST=0.0.0.0 AGENT_EVALUATION_INTERNAL_PORT=8200 \
     EVALUATION_DATA_DIR=/var/lib/agent-evaluation \
-    EVALUATION_DATASET_PATH=/app/datasets/raglab-medical-sales-production-sample-v2.json
+    EVALUATION_DATASET_PATH=/app/datasets/raglab-medical-sales-production-sample-v2.json \
+    DOCUMENT_QUALITY_DATASET_PATH=/app/datasets/raglab-document-quality-v1.json
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY public ./public
 COPY datasets ./datasets
 RUN mkdir -p /var/lib/agent-evaluation/runs /var/lib/agent-evaluation/experiments /var/lib/agent-evaluation/pilots \
-    /var/lib/agent-evaluation/workspaces /var/lib/agent-evaluation/stage-experiments \
+    /var/lib/agent-evaluation/workspaces /var/lib/agent-evaluation/stage-experiments /var/lib/agent-evaluation/document-quality-experiments \
     && chown -R node:node /var/lib/agent-evaluation
 USER node
 EXPOSE 8200
