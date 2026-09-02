@@ -2,7 +2,7 @@
   "schema": "agent-evaluation.document-quality.dataset.v1",
   "suite_id": "raglab.document-quality.v1",
   "dataset_id": "raglab-document-quality-v1",
-  "version": "1.3.0",
+  "version": "1.5.0",
   "domain": "medical-device-documentation",
   "language": "zh-CN",
   "provenance": "synthetic-and-confirmed-ocr-regression",
@@ -12,7 +12,7 @@
     "development": {
       "purpose": "形成 OCR、Cleaning 与 Chunk 单变量优化假设。",
       "prompt_visible": true,
-      "case_count": 4
+      "case_count": 5
     },
     "holdout": {
       "purpose": "按源文档组隔离的盲测文档，防止针对可见页面过拟合。",
@@ -109,6 +109,17 @@
       ]
     },
     {
+      "case_id": "dev-ocr-degraded-fallback-005",
+      "split": "development",
+      "source_group": "synthetic-monitor-degraded-ocr-r1",
+      "input_variant": "scan-180dpi-low-contrast-table-fallback",
+      "expected_status": "ready",
+      "critical_fields": ["BeneVision N12", "N12-DEVELOPMENT-031"],
+      "forbidden_normalizations": ["BeneVision NI2"],
+      "protected_text": ["BeneVision N12"],
+      "expected_reading_order": ["BeneVision N12", "N12-DEVELOPMENT-031"]
+    },
+    {
       "case_id": "holdout-rotated-manual-001",
       "split": "holdout",
       "source_group": "synthetic-pump-manual-r1",
@@ -117,7 +128,16 @@
       "critical_fields": ["BeneFusion uVP", "INF-OCC-017"],
       "forbidden_normalizations": ["INF-0CC-017"],
       "expected_reading_order": ["BeneFusion uVP", "INF-OCC-017", "停止输注并检查管路"],
-      "required_chunk_spans": ["INF-OCC-017 停止输注并检查管路"]
+      "required_chunk_spans": ["INF-OCC-017 停止输注并检查管路"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-pump-occlusion-query",
+          "query": "BeneFusion uVP 出现 INF-OCC-017 后如何处理？",
+          "required_document_ids": ["synthetic-pump-manual-r1"],
+          "required_source_pages": [1],
+          "required_content_spans": ["INF-OCC-017 停止输注并检查管路"]
+        }
+      ]
     },
     {
       "case_id": "holdout-low-dpi-review-002",
@@ -140,7 +160,16 @@
         {"type": "table", "contains": "C2 | 2.6"}
       ],
       "critical_fields": ["C2", "2.6", "MAINT-003"],
-      "required_chunk_spans": ["MAINT-003 仅授权服务人员执行"]
+      "required_chunk_spans": ["MAINT-003 仅授权服务人员执行"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-aed-maintenance-query",
+          "query": "BeneHeart C2 软件 2.6 的 MAINT-003 谁可以执行？",
+          "required_document_ids": ["synthetic-aed-maintenance-r2"],
+          "required_heading_paths": [["维护前检查"]],
+          "required_content_spans": ["MAINT-003 仅授权服务人员执行"]
+        }
+      ]
     },
     {
       "case_id": "regression-high-confidence-word-001",

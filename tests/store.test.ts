@@ -33,9 +33,14 @@ test("persists runs and preserves tenant isolation", async () => {
     assert.equal((await store.listStageExperiments({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] }, workspace.workspace_id)).length, 1);
     assert.equal((await store.listStageExperiments({ subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }, workspace.workspace_id)).length, 0);
 
-    const documentExperiment = { experiment_id: `docqexp_${"e".repeat(32)}`, tenant_id: "tenant_a", started_at: new Date().toISOString() } as DocumentQualityExperiment;
+    const documentExperiment = {
+      experiment_id: `docqexp_${"e".repeat(32)}`, tenant_id: "tenant_a", started_at: new Date().toISOString(),
+      release_gate: { attempt_key: "sha256:sealed-attempt" },
+    } as DocumentQualityExperiment;
     await store.saveDocumentQualityExperiment(documentExperiment);
     assert.equal((await store.listDocumentQualityExperiments({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] })).length, 1);
     assert.equal(await store.getDocumentQualityExperiment(documentExperiment.experiment_id, { subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }), undefined);
+    assert.equal(await store.hasDocumentQualityGateAttempt({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] }, "sha256:sealed-attempt"), true);
+    assert.equal(await store.hasDocumentQualityGateAttempt({ subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }, "sha256:sealed-attempt"), false);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

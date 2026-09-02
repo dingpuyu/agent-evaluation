@@ -1,4 +1,4 @@
-.PHONY: install build test deploy-test deploy-init deploy-check deploy-up deploy-verify deploy-status deploy-down up down status smoke studio-smoke split-smoke document-quality-smoke document-quality-import pilot document-eval document-compare import-production
+.PHONY: install build test deploy-test deploy-init deploy-check deploy-up deploy-verify deploy-status deploy-down up down status smoke studio-smoke split-smoke document-quality-smoke document-quality-import document-quality-holdout pilot document-eval document-compare import-production
 
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then echo 'docker-compose'; else echo 'docker compose'; fi)
 EVALUATION_ENV_FILE ?= .env
@@ -67,6 +67,12 @@ document-quality-import:
 	@test -n "$${BASELINE}" || (echo "BASELINE=/path/to/baseline-artifacts.json is required" && exit 1)
 	@test -n "$${CANDIDATE}" || (echo "CANDIDATE=/path/to/candidate-artifacts.json is required" && exit 1)
 	$(WITH_ENV) python3 scripts/import_document_quality_experiment.py --baseline "$${BASELINE}" --candidate "$${CANDIDATE}"
+
+document-quality-holdout:
+	@test -n "$${PARENT_EXPERIMENT}" || (echo "PARENT_EXPERIMENT=docqexp_... is required" && exit 1)
+	@test -n "$${BASELINE}" || (echo "BASELINE=/path/to/holdout-baseline.json is required" && exit 1)
+	@test -n "$${CANDIDATE}" || (echo "CANDIDATE=/path/to/holdout-candidate.json is required" && exit 1)
+	$(WITH_ENV) python3 scripts/run_document_quality_holdout_gate.py --parent-experiment "$${PARENT_EXPERIMENT}" --baseline "$${BASELINE}" --candidate "$${CANDIDATE}"
 
 pilot:
 	$(WITH_ENV) python3 scripts/pilot.py

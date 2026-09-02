@@ -7,8 +7,10 @@ import { loadConfig } from "./config.js";
 import type { DatasetSplit, Identity } from "./contracts.js";
 import { DATASET_SPLITS, datasetForSplit, datasetSplitSummary, loadDataset, publicDatasetView } from "./dataset.js";
 import {
+  completeDocumentQualityHoldoutGate,
   completeDocumentQualityRetrievalExperiment,
   DOCUMENT_RETRIEVAL_LAYERS,
+  prepareDocumentQualityHoldoutGate,
   prepareDocumentQualityRetrievalExperiment,
   runDocumentQualityExperiment,
 } from "./document-quality-platform.js";
@@ -26,6 +28,7 @@ const activeSubjects = new Set<string>();
 const activePilots = new Set<string>();
 const activeWorkspaces = new Set<string>();
 const activeStageExperiments = new Set<string>();
+const activeDocumentQualityGates = new Set<string>();
 const publicDir = join(process.cwd(), "public");
 
 function datasetSplit(value: unknown, fallback: DatasetSplit): DatasetSplit {
@@ -181,9 +184,10 @@ const server = createServer(async (request, response) => {
         },
         evaluated_layers: [...DOCUMENT_RETRIEVAL_LAYERS],
         pipeline: ["OCR", "Layout", "Cleaner", "Chunk", "Retrieval"],
-        current_stage: "retrieval-sandbox",
+        current_stage: "sealed-holdout-gate",
         guardrails: [
-          "Development 可反复调参；Holdout 和 Regression 不向交互实验暴露",
+          "Development 可反复调参；Holdout 只能引用已通过的 Development Retrieval 由服务端门禁触发，Regression 暂不开放",
+          "同一 Candidate Fingerprint 与 Dataset Snapshot 只允许一次 Holdout 质量判定；基础设施失败才可重试",
           "Baseline 与 Candidate 必须拥有相同的 OCR、版面和清洗产物",
           "原始 Blocks/Chunks 仅在内存评测，持久化记录只保留必要的 Golden 检查摘要",
           "Retrieval 使用服务端生成的临时 Milvus Collection，Qwen/Milvus/Rerank 完成后必须清理",
@@ -204,6 +208,46 @@ const server = createServer(async (request, response) => {
       const experiment = await store.getDocumentQualityExperiment(documentQualityMatch[1], identity);
       if (!experiment) throw new UpstreamError(404, "document quality experiment was not found or is not accessible");
       writeJSON(response, 200, experiment);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/v1/document-quality/holdout-gates") {
+      const { identity, adapter } = await adminContext(request);
+      const body = await readJSON(request, 2 * 1024 * 1024);
+      const parentID = String(body.parent_experiment_id ?? "");
+      const parent = await store.getDocumentQualityExperiment(parentID, identity);
+      if (!parent) throw new UpstreamError(404, "parent development experiment was not found or is not accessible");
+      let attemptKey = "";
+      try {
+        const dataset = await loadDocumentQualityDataset(config.documentQualityDatasetPath);
+        const prepared = prepareDocumentQualityHoldoutGate({
+          dataset,
+          parent_experiment: parent,
+          intervention: body.intervention,
+          baseline_artifacts: body.baseline_artifacts,
+          candidate_artifacts: body.candidate_artifacts,
+        });
+        attemptKey = prepared.attempt_key;
+        if (activeDocumentQualityGates.has(attemptKey) || await store.hasDocumentQualityGateAttempt(identity, attemptKey)) {
+          throw new UpstreamError(409, "this frozen candidate already consumed its one quality-result Holdout attempt");
+        }
+        activeDocumentQualityGates.add(attemptKey);
+        const baselineRetrieval = await adapter.runDocumentRetrievalSandbox(prepared.baseline_request);
+        const candidateRetrieval = await adapter.runDocumentRetrievalSandbox(prepared.candidate_request);
+        const experiment = completeDocumentQualityHoldoutGate({
+          identity,
+          dataset,
+          prepared,
+          baseline_retrieval: baselineRetrieval,
+          candidate_retrieval: candidateRetrieval,
+        });
+        await store.saveDocumentQualityExperiment(experiment);
+        writeJSON(response, 201, experiment);
+      } catch (error) {
+        if (error instanceof UpstreamError) throw error;
+        throw new UpstreamError(400, error instanceof Error ? error.message : "invalid document quality Holdout gate");
+      } finally {
+        if (attemptKey) activeDocumentQualityGates.delete(attemptKey);
+      }
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/v1/document-quality/experiments") {

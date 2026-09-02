@@ -113,6 +113,20 @@
         }
       ],
       "retrieval": []
+    },
+    {
+      "schema": "agent-evaluation.document-quality.artifact.v1",
+      "case_id": "dev-ocr-degraded-fallback-005",
+      "status": "ready",
+      "indexed": true,
+      "config_fingerprint": "contract-fixture:document-ir-v4:700-80",
+      "blocks": [
+        {"block_type": "paragraph", "text": "BeneVision N12 维修接收单", "page": 1, "confidence": 0.91},
+        {"block_type": "paragraph", "text": "设备编号：N12-DEVELOPMENT-031", "page": 1, "confidence": 0.89}
+      ],
+      "cleaning": {"removed_blocks": []},
+      "chunks": [],
+      "retrieval": []
     }
   ]
 }

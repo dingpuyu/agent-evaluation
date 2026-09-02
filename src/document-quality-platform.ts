@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Identity } from "./contracts.js";
 import {
@@ -13,7 +13,10 @@ import {
 } from "./document-quality.js";
 
 export const DOCUMENT_PREINDEX_LAYERS = ["ocr", "layout", "cleaning", "chunk"] as const satisfies readonly DocumentFailureLayer[];
-export const DOCUMENT_RETRIEVAL_LAYERS = ["ocr", "layout", "cleaning", "chunk", "retrieval"] as const satisfies readonly DocumentFailureLayer[];
+export const DOCUMENT_RETRIEVAL_LAYERS = ["ocr", "layout", "cleaning", "chunk", "retrieval", "safety"] as const satisfies readonly DocumentFailureLayer[];
+export const DOCUMENT_HOLDOUT_LAYERS = ["ocr", "layout", "cleaning", "chunk", "retrieval", "safety"] as const satisfies readonly DocumentFailureLayer[];
+
+type RunnableDocumentQualitySplit = "development" | "holdout";
 
 export interface DocumentArtifactBundle {
   schema: "agent-evaluation.document-quality.artifacts.v1";
@@ -49,7 +52,7 @@ export interface DocumentQualityExperiment {
     dataset_id: string;
     version: string;
     snapshot: string;
-    split: "development";
+    split: RunnableDocumentQualitySplit;
   };
   evaluated_layers: DocumentFailureLayer[];
   execution_stage: "pre-index" | "retrieval-sandbox";
@@ -58,10 +61,22 @@ export interface DocumentQualityExperiment {
   candidate_report: DocumentQualityReport;
   comparison: DocumentQualityComparison;
   diagnosis: DocumentQualityDiagnosis;
-  promotion_status: "development_passed" | "retrieval_passed" | "hold";
+  promotion_status: "development_passed" | "retrieval_passed" | "holdout_passed" | "hold";
   retrieval_sandbox?: {
     baseline: RetrievalSandboxSummary;
     candidate: RetrievalSandboxSummary;
+  };
+  frozen_profiles: {
+    baseline: { label: string; bundle_config: Record<string, unknown>; fingerprint: string };
+    candidate: { label: string; bundle_config: Record<string, unknown>; fingerprint: string };
+  };
+  release_gate?: {
+    kind: "holdout-once";
+    parent_experiment_id: string;
+    attempt_key: string;
+    candidate_fingerprint: string;
+    verdict: "pass" | "fail";
+    retry_policy: "quality-result-is-final; infrastructure-failure-may-retry";
   };
   production_mutation: false;
   raw_artifacts_persisted: false;
@@ -162,8 +177,16 @@ export interface PreparedRetrievalExperiment {
   baseline_bundle: DocumentArtifactBundle;
   candidate_bundle: DocumentArtifactBundle;
   intervention: DocumentQualityIntervention;
+  split: RunnableDocumentQualitySplit;
   baseline_request: RetrievalSandboxRequest;
   candidate_request: RetrievalSandboxRequest;
+}
+
+export interface PreparedDocumentQualityHoldoutGate extends PreparedRetrievalExperiment {
+  split: "holdout";
+  parent_experiment: DocumentQualityExperiment;
+  attempt_key: string;
+  candidate_fingerprint: string;
 }
 
 export interface RunDocumentQualityExperimentInput {
@@ -224,12 +247,34 @@ function intervention(value: unknown, baseline: DocumentArtifactBundle, candidat
   return { variable: "chunk_profile", baseline: baselineLabel, candidate: candidateLabel, rationale };
 }
 
-function assertExactCaseSet(dataset: DocumentQualityDataset, bundle: DocumentArtifactBundle, name: string): void {
-  const expected = dataset.cases.filter((item) => item.split === "development").map((item) => item.case_id).sort();
+function assertExactCaseSet(dataset: DocumentQualityDataset, bundle: DocumentArtifactBundle, name: string, split: RunnableDocumentQualitySplit): void {
+  const expected = dataset.cases.filter((item) => item.split === split).map((item) => item.case_id).sort();
   const actual = bundle.artifacts.map((item) => item.case_id).sort();
   if (new Set(actual).size !== actual.length || JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${name} must contain every development case exactly once`);
+    throw new Error(`${name} must contain every ${split} case exactly once`);
   }
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function frozenProfile(label: string, bundle: DocumentArtifactBundle) {
+  const bundleConfig = bundle.config ?? {};
+  const fingerprint = `sha256:${createHash("sha256").update(canonical({ label, bundle_config: bundleConfig })).digest("hex")}`;
+  return { label, bundle_config: bundleConfig, fingerprint };
+}
+
+function frozenProfiles(interventionValue: DocumentQualityIntervention, baseline: DocumentArtifactBundle, candidate: DocumentArtifactBundle) {
+  return {
+    baseline: frozenProfile(interventionValue.baseline, baseline),
+    candidate: frozenProfile(interventionValue.candidate, candidate),
+  };
 }
 
 function stablePreChunkState(artifact: DocumentPipelineArtifact): string {
@@ -286,8 +331,8 @@ export function runDocumentQualityExperiment(input: RunDocumentQualityExperiment
   const layers = selectedLayers(input.evaluated_layers);
   const baselineBundle = artifactBundle(input.baseline_artifacts, "baseline_artifacts");
   const candidateBundle = artifactBundle(input.candidate_artifacts, "candidate_artifacts");
-  assertExactCaseSet(input.dataset, baselineBundle, "baseline_artifacts");
-  assertExactCaseSet(input.dataset, candidateBundle, "candidate_artifacts");
+  assertExactCaseSet(input.dataset, baselineBundle, "baseline_artifacts", "development");
+  assertExactCaseSet(input.dataset, candidateBundle, "candidate_artifacts", "development");
   assertSingleVariableExperiment(baselineBundle, candidateBundle);
   const selectedIntervention = intervention(input.intervention, baselineBundle, candidateBundle);
   const startedAt = new Date().toISOString();
@@ -317,6 +362,7 @@ export function runDocumentQualityExperiment(input: RunDocumentQualityExperiment
     comparison,
     diagnosis,
     promotion_status: comparison.promotable ? "development_passed" : "hold",
+    frozen_profiles: frozenProfiles(selectedIntervention, baselineBundle, candidateBundle),
     production_mutation: false,
     raw_artifacts_persisted: false,
   };
@@ -327,12 +373,15 @@ function sandboxRequest(
   variant: "baseline" | "candidate",
   dataset: DocumentQualityDataset,
   bundle: DocumentArtifactBundle,
+  split: RunnableDocumentQualitySplit,
 ): RetrievalSandboxRequest {
-  const development = dataset.cases.filter((item) => item.split === "development");
-  const caseByID = new Map(development.map((item) => [item.case_id, item]));
+  const cases = dataset.cases.filter((item) => item.split === split);
+  const caseByID = new Map(cases.map((item) => [item.case_id, item]));
   const chunks = bundle.artifacts.flatMap((artifact) => {
     const golden = caseByID.get(artifact.case_id);
-    if (!golden) return [];
+    // review_required / ocr_required artifacts must never reach Embedding or
+    // an index. Holdout contains an explicit probe for this release boundary.
+    if (!golden || artifact.status !== "ready") return [];
     return artifact.chunks.map((chunk) => ({
       chunk_id: chunk.chunk_id,
       document_id: golden.source_group,
@@ -350,13 +399,13 @@ function sandboxRequest(
   // from corpus/chunk count. The first real run sent all 34 candidates to
   // Qwen; top-20 preserved every golden hit while cutting provider work.
   const candidateK = 20;
-  const queries = development.flatMap((item) => (item.retrieval_queries ?? []).map((query) => ({
+  const queries = cases.flatMap((item) => (item.retrieval_queries ?? []).map((query) => ({
     query_id: query.query_id,
     query: query.query,
     top_k: 5,
     candidate_k: candidateK,
   })));
-  if (!queries.length) throw new Error("development split has no retrieval queries");
+  if (!queries.length) throw new Error(`${split} split has no retrieval queries`);
   return { run_id: runID, variant, chunks, queries };
 }
 
@@ -372,8 +421,8 @@ export function prepareDocumentQualityRetrievalExperiment(input: {
   }
   const baseline = artifactBundle(input.baseline_artifacts, "baseline_artifacts");
   const candidate = artifactBundle(input.candidate_artifacts, "candidate_artifacts");
-  assertExactCaseSet(input.dataset, baseline, "baseline_artifacts");
-  assertExactCaseSet(input.dataset, candidate, "candidate_artifacts");
+  assertExactCaseSet(input.dataset, baseline, "baseline_artifacts", "development");
+  assertExactCaseSet(input.dataset, candidate, "candidate_artifacts", "development");
   assertSingleVariableExperiment(baseline, candidate);
   const selectedIntervention = intervention(input.intervention, baseline, candidate);
   const runID = `docqrun_${randomUUID().replaceAll("-", "")}`;
@@ -383,8 +432,60 @@ export function prepareDocumentQualityRetrievalExperiment(input: {
     baseline_bundle: baseline,
     candidate_bundle: candidate,
     intervention: selectedIntervention,
-    baseline_request: sandboxRequest(runID, "baseline", input.dataset, baseline),
-    candidate_request: sandboxRequest(runID, "candidate", input.dataset, candidate),
+    split: "development",
+    baseline_request: sandboxRequest(runID, "baseline", input.dataset, baseline, "development"),
+    candidate_request: sandboxRequest(runID, "candidate", input.dataset, candidate, "development"),
+  };
+}
+
+export function prepareDocumentQualityHoldoutGate(input: {
+  dataset: DocumentQualityDataset;
+  parent_experiment: DocumentQualityExperiment;
+  intervention?: unknown;
+  baseline_artifacts?: unknown;
+  candidate_artifacts?: unknown;
+}): PreparedDocumentQualityHoldoutGate {
+  const parent = input.parent_experiment;
+  if (parent.dataset.split !== "development" || parent.execution_stage !== "retrieval-sandbox" || parent.promotion_status !== "retrieval_passed") {
+    throw new Error("holdout requires a passed development retrieval experiment");
+  }
+  if (parent.dataset.snapshot !== (input.dataset.snapshot_id ?? "unversioned")) {
+    throw new Error("holdout dataset snapshot differs from the parent development experiment");
+  }
+  const baseline = artifactBundle(input.baseline_artifacts, "baseline_artifacts");
+  const candidate = artifactBundle(input.candidate_artifacts, "candidate_artifacts");
+  assertExactCaseSet(input.dataset, baseline, "baseline_artifacts", "holdout");
+  assertExactCaseSet(input.dataset, candidate, "candidate_artifacts", "holdout");
+  assertSingleVariableExperiment(baseline, candidate);
+  const selectedIntervention = intervention(input.intervention, baseline, candidate);
+  if (canonical({ variable: selectedIntervention.variable, baseline: selectedIntervention.baseline, candidate: selectedIntervention.candidate })
+    !== canonical({ variable: parent.intervention.variable, baseline: parent.intervention.baseline, candidate: parent.intervention.candidate })) {
+    throw new Error("holdout intervention must exactly match the frozen development experiment");
+  }
+  const profiles = frozenProfiles(selectedIntervention, baseline, candidate);
+  if (profiles.baseline.fingerprint !== parent.frozen_profiles.baseline.fingerprint
+    || profiles.candidate.fingerprint !== parent.frozen_profiles.candidate.fingerprint) {
+    throw new Error("holdout bundle configuration does not match the frozen development profiles");
+  }
+  const candidateFingerprint = profiles.candidate.fingerprint;
+  const attemptKey = `sha256:${createHash("sha256").update(canonical({
+    tenant_id: parent.tenant_id,
+    dataset_snapshot: parent.dataset.snapshot,
+    candidate_fingerprint: candidateFingerprint,
+  })).digest("hex")}`;
+  const runID = `docqgate_${randomUUID().replaceAll("-", "")}`;
+  return {
+    run_id: runID,
+    started_at: new Date().toISOString(),
+    baseline_bundle: baseline,
+    candidate_bundle: candidate,
+    intervention: selectedIntervention,
+    split: "holdout",
+    baseline_request: sandboxRequest(runID, "baseline", input.dataset, baseline, "holdout"),
+    candidate_request: sandboxRequest(runID, "candidate", input.dataset, candidate, "holdout"),
+    parent_experiment: parent,
+    attempt_key: attemptKey,
+    candidate_fingerprint: candidateFingerprint,
   };
 }
 
@@ -423,12 +524,12 @@ function validateSandboxRun(value: RetrievalSandboxRun, expected: RetrievalSandb
   }
 }
 
-function artifactsWithRetrieval(bundle: DocumentArtifactBundle, dataset: DocumentQualityDataset, run: RetrievalSandboxRun): DocumentPipelineArtifact[] {
+function artifactsWithRetrieval(bundle: DocumentArtifactBundle, dataset: DocumentQualityDataset, run: RetrievalSandboxRun, split: RunnableDocumentQualitySplit): DocumentPipelineArtifact[] {
   const queryByID = new Map(run.queries.map((query) => [query.query_id, query]));
-  const caseByID = new Map(dataset.cases.filter((item) => item.split === "development").map((item) => [item.case_id, item]));
+  const caseByID = new Map(dataset.cases.filter((item) => item.split === split).map((item) => [item.case_id, item]));
   return bundle.artifacts.map((artifact) => ({
     ...artifact,
-    indexed: true,
+    indexed: artifact.status === "ready",
     retrieval: (caseByID.get(artifact.case_id)?.retrieval_queries ?? []).map((golden) => {
       const actual = queryByID.get(golden.query_id);
       if (!actual) throw new Error(`retrieval sandbox omitted query ${golden.query_id}`);
@@ -496,13 +597,13 @@ export function completeDocumentQualityRetrievalExperiment(input: {
   validateSandboxRun(input.candidate_retrieval, input.prepared.candidate_request);
   const baselineReport = evaluateDocumentQuality(
     input.dataset,
-    artifactsWithRetrieval(input.prepared.baseline_bundle, input.dataset, input.baseline_retrieval),
+    artifactsWithRetrieval(input.prepared.baseline_bundle, input.dataset, input.baseline_retrieval, "development"),
     "development",
     DOCUMENT_RETRIEVAL_LAYERS,
   );
   const candidateReport = evaluateDocumentQuality(
     input.dataset,
-    artifactsWithRetrieval(input.prepared.candidate_bundle, input.dataset, input.candidate_retrieval),
+    artifactsWithRetrieval(input.prepared.candidate_bundle, input.dataset, input.candidate_retrieval, "development"),
     "development",
     DOCUMENT_RETRIEVAL_LAYERS,
   );
@@ -530,6 +631,89 @@ export function completeDocumentQualityRetrievalExperiment(input: {
     comparison,
     diagnosis,
     promotion_status: comparison.promotable ? "retrieval_passed" : "hold",
+    frozen_profiles: frozenProfiles(input.prepared.intervention, input.prepared.baseline_bundle, input.prepared.candidate_bundle),
+    retrieval_sandbox: {
+      baseline: sandboxSummary(input.baseline_retrieval),
+      candidate: sandboxSummary(input.candidate_retrieval),
+    },
+    production_mutation: false,
+    raw_artifacts_persisted: false,
+  };
+}
+
+function assertFrozenRetrievalProvider(parent: DocumentQualityExperiment, baseline: RetrievalSandboxRun, candidate: RetrievalSandboxRun): void {
+  const expected = parent.retrieval_sandbox;
+  if (!expected) throw new Error("parent development experiment omitted retrieval provider evidence");
+  const signature = (value: { provider?: { embedder: string; dimensions: number; reranker: string }; embedder?: string; dimensions?: number; reranker?: string; retrieval: string; index: string }) => canonical({
+    embedder: value.provider?.embedder ?? value.embedder,
+    dimensions: value.provider?.dimensions ?? value.dimensions,
+    reranker: value.provider?.reranker ?? value.reranker,
+    retrieval: value.retrieval,
+    index: value.index,
+  });
+  if (signature(expected.baseline) !== signature(baseline) || signature(expected.candidate) !== signature(candidate)) {
+    throw new Error("holdout retrieval provider/index differs from the frozen development experiment");
+  }
+}
+
+export function completeDocumentQualityHoldoutGate(input: {
+  identity: Identity;
+  dataset: DocumentQualityDataset;
+  prepared: PreparedDocumentQualityHoldoutGate;
+  baseline_retrieval: RetrievalSandboxRun;
+  candidate_retrieval: RetrievalSandboxRun;
+}): DocumentQualityExperiment {
+  validateSandboxRun(input.baseline_retrieval, input.prepared.baseline_request);
+  validateSandboxRun(input.candidate_retrieval, input.prepared.candidate_request);
+  assertFrozenRetrievalProvider(input.prepared.parent_experiment, input.baseline_retrieval, input.candidate_retrieval);
+  const baselineReport = evaluateDocumentQuality(
+    input.dataset,
+    artifactsWithRetrieval(input.prepared.baseline_bundle, input.dataset, input.baseline_retrieval, "holdout"),
+    "holdout",
+    DOCUMENT_HOLDOUT_LAYERS,
+  );
+  const candidateReport = evaluateDocumentQuality(
+    input.dataset,
+    artifactsWithRetrieval(input.prepared.candidate_bundle, input.dataset, input.candidate_retrieval, "holdout"),
+    "holdout",
+    DOCUMENT_HOLDOUT_LAYERS,
+  );
+  const comparison = compareDocumentQualityReports(baselineReport, candidateReport);
+  const diagnosis = diagnose(baselineReport, candidateReport, comparison);
+  diagnosis.recommendation = comparison.promotable
+    ? "一次性 Holdout 门禁通过，可进入 Regression；仍不能跳过回归集直接发布。"
+    : "冻结本次失败，不得查看 Holdout 后原地调参；应把失败模式转写成新的 Development Bad Case，再形成新候选。";
+  return {
+    schema: "agent-evaluation.document-quality.experiment.v1",
+    experiment_id: `docqexp_${randomUUID().replaceAll("-", "")}`,
+    tenant_id: input.identity.tenant_id,
+    requested_by: input.identity.subject,
+    started_at: input.prepared.started_at,
+    completed_at: new Date().toISOString(),
+    dataset: {
+      suite_id: input.dataset.suite_id,
+      dataset_id: input.dataset.dataset_id,
+      version: input.dataset.version,
+      snapshot: input.dataset.snapshot_id ?? "unversioned",
+      split: "holdout",
+    },
+    evaluated_layers: [...DOCUMENT_HOLDOUT_LAYERS],
+    execution_stage: "retrieval-sandbox",
+    intervention: input.prepared.intervention,
+    baseline_report: baselineReport,
+    candidate_report: candidateReport,
+    comparison,
+    diagnosis,
+    promotion_status: comparison.promotable ? "holdout_passed" : "hold",
+    frozen_profiles: frozenProfiles(input.prepared.intervention, input.prepared.baseline_bundle, input.prepared.candidate_bundle),
+    release_gate: {
+      kind: "holdout-once",
+      parent_experiment_id: input.prepared.parent_experiment.experiment_id,
+      attempt_key: input.prepared.attempt_key,
+      candidate_fingerprint: input.prepared.candidate_fingerprint,
+      verdict: comparison.promotable ? "pass" : "fail",
+      retry_policy: "quality-result-is-final; infrastructure-failure-may-retry",
+    },
     retrieval_sandbox: {
       baseline: sandboxSummary(input.baseline_retrieval),
       candidate: sandboxSummary(input.candidate_retrieval),

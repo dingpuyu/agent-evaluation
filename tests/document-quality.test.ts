@@ -61,8 +61,8 @@ function passingArtifact(): DocumentPipelineArtifact {
 
 test("loads the frozen document quality dataset with source-grouped splits", async () => {
   const dataset = await loadDocumentQualityDataset("./datasets/raglab-document-quality-v1.json");
-  assert.equal(dataset.cases.length, 10);
-  assert.equal(dataset.cases.filter((item) => item.split === "development").length, 4);
+  assert.equal(dataset.cases.length, 11);
+  assert.equal(dataset.cases.filter((item) => item.split === "development").length, 5);
   assert.equal(dataset.cases.filter((item) => item.split === "holdout").length, 3);
   assert.equal(dataset.cases.filter((item) => item.split === "regression").length, 3);
   assert.match(dataset.snapshot_id ?? "", /^sha256:[a-f0-9]{64}$/);

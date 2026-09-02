@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  completeDocumentQualityHoldoutGate,
   completeDocumentQualityRetrievalExperiment,
+  prepareDocumentQualityHoldoutGate,
   prepareDocumentQualityRetrievalExperiment,
   runDocumentQualityExperiment,
   type DocumentArtifactBundle,
@@ -22,6 +24,40 @@ async function candidateBundle(): Promise<DocumentArtifactBundle> {
     schema: "agent-evaluation.document-quality.artifacts.v1",
     config: { max_runes: 700, overlap_runes: 80 },
     artifacts: fixture.artifacts.map((artifact) => ({ ...clone(artifact), indexed: false, retrieval: [] })),
+  };
+}
+
+function holdoutBundle(maxRunes: number, overlapRunes: number): DocumentArtifactBundle {
+  const artifact = (caseID: string, status: "ready" | "review_required", blocks: DocumentPipelineArtifact["blocks"], chunks: DocumentPipelineArtifact["chunks"]): DocumentPipelineArtifact => ({
+    schema: "agent-evaluation.document-quality.artifact.v1",
+    case_id: caseID,
+    status,
+    indexed: false,
+    config_fingerprint: `test:${maxRunes}-${overlapRunes}`,
+    blocks,
+    cleaning: { removed_blocks: [] },
+    chunks,
+    retrieval: [],
+  });
+  return {
+    schema: "agent-evaluation.document-quality.artifacts.v1",
+    config: { max_runes: maxRunes, overlap_runes: overlapRunes },
+    artifacts: [
+      artifact("holdout-rotated-manual-001", "ready", [
+        { block_type: "heading", text: "BeneFusion uVP", page: 1 },
+        { block_type: "paragraph", text: "INF-OCC-017", page: 1 },
+        { block_type: "paragraph", text: "INF-OCC-017 停止输注并检查管路", page: 1 },
+      ], [{ chunk_id: `pump-${maxRunes}`, parent_id: "pump", content: "BeneFusion uVP INF-OCC-017 停止输注并检查管路", parent_content: "BeneFusion uVP INF-OCC-017 停止输注并检查管路", source_page: 1 }]),
+      artifact("holdout-low-dpi-review-002", "review_required", [
+        { block_type: "paragraph", text: "BeneVision N1" },
+      ], [{ chunk_id: `review-${maxRunes}`, parent_id: "review", content: "BeneVision N1", parent_content: "BeneVision N1" }]),
+      artifact("holdout-docx-structure-003", "ready", [
+        { block_type: "heading", text: "维护前检查", heading_path: ["维护前检查"] },
+        { block_type: "list", text: "确认设备已退出临床使用", heading_path: ["维护前检查"] },
+        { block_type: "table", text: "C2 | 2.6", heading_path: ["维护前检查"] },
+        { block_type: "paragraph", text: "MAINT-003 仅授权服务人员执行", heading_path: ["维护前检查"] },
+      ], [{ chunk_id: `aed-${maxRunes}`, parent_id: "aed", content: "维护前检查 C2 2.6 MAINT-003 仅授权服务人员执行", parent_content: "维护前检查 C2 2.6 MAINT-003 仅授权服务人员执行", heading_path: ["维护前检查"] }]),
+    ],
   };
 }
 
@@ -49,8 +85,8 @@ test("runs and diagnoses a single-variable development document experiment", asy
   });
 
   assert.equal(experiment.promotion_status, "development_passed");
-  assert.equal(experiment.comparison.baseline.cases_passed, 3);
-  assert.equal(experiment.comparison.candidate.cases_passed, 4);
+  assert.equal(experiment.comparison.baseline.cases_passed, 4);
+  assert.equal(experiment.comparison.candidate.cases_passed, 5);
   assert.deepEqual(experiment.comparison.fixed_cases, ["dev-chunk-long-procedure-004"]);
   assert.equal(experiment.diagnosis.root_cause_layer, "chunk");
   assert.equal(experiment.production_mutation, false);
@@ -82,6 +118,8 @@ function sandboxResult(request: RetrievalSandboxRequest): RetrievalSandboxRun {
     ["dev-aed-code-query", "synthetic-aed-troubleshooting-r1"],
     ["dev-version-table-query", "synthetic-vsm-compatibility-r1"],
     ["dev-long-procedure-query", "synthetic-long-service-procedure-r1"],
+    ["holdout-pump-occlusion-query", "synthetic-pump-manual-r1"],
+    ["holdout-aed-maintenance-query", "synthetic-aed-maintenance-r2"],
   ]);
   return {
     schema: "raglab.retrieval-sandbox.run.v1",
@@ -127,6 +165,50 @@ function sandboxResult(request: RetrievalSandboxRequest): RetrievalSandboxRun {
     }),
   };
 }
+
+test("runs a frozen one-time Holdout gate and blocks non-ready artifacts from indexing", async () => {
+  const dataset = await loadDocumentQualityDataset("./datasets/raglab-document-quality-v1.json");
+  const developmentCandidate = await candidateBundle();
+  const developmentBaseline = clone(developmentCandidate);
+  developmentBaseline.config = { max_runes: 400, overlap_runes: 100 };
+  const developmentPrepared = prepareDocumentQualityRetrievalExperiment({
+    dataset,
+    intervention: { variable: "chunk_profile", baseline: "400/100", candidate: "700/80" },
+    baseline_artifacts: developmentBaseline,
+    candidate_artifacts: developmentCandidate,
+  });
+  const parent = completeDocumentQualityRetrievalExperiment({
+    identity: { subject: "alice", tenant_id: "tenant_a", roles: ["admin"] },
+    dataset,
+    prepared: developmentPrepared,
+    baseline_retrieval: sandboxResult(developmentPrepared.baseline_request),
+    candidate_retrieval: sandboxResult(developmentPrepared.candidate_request),
+  });
+  assert.equal(parent.promotion_status, "retrieval_passed");
+
+  const baseline = holdoutBundle(400, 100);
+  const candidate = holdoutBundle(700, 80);
+  const prepared = prepareDocumentQualityHoldoutGate({
+    dataset,
+    parent_experiment: parent,
+    intervention: { variable: "chunk_profile", baseline: "400/100", candidate: "700/80" },
+    baseline_artifacts: baseline,
+    candidate_artifacts: candidate,
+  });
+  assert.equal(prepared.baseline_request.chunks.some((item) => item.chunk_id.startsWith("review-")), false);
+  const result = completeDocumentQualityHoldoutGate({
+    identity: { subject: "alice", tenant_id: "tenant_a", roles: ["admin"] },
+    dataset,
+    prepared,
+    baseline_retrieval: sandboxResult(prepared.baseline_request),
+    candidate_retrieval: sandboxResult(prepared.candidate_request),
+  });
+  assert.equal(result.dataset.split, "holdout");
+  assert.equal(result.promotion_status, "holdout_passed");
+  assert.equal(result.release_gate?.verdict, "pass");
+  assert.equal(result.candidate_report.metrics.find((item) => item.name === "unsafe_publish_count")?.value, 0);
+  assert.equal(result.retrieval_sandbox?.candidate.chunks_indexed, 2);
+});
 
 test("runs a real-provider retrieval contract without persisting raw chunks", async () => {
   const dataset = await loadDocumentQualityDataset("./datasets/raglab-document-quality-v1.json");

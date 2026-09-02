@@ -196,4 +196,15 @@ export class RunStore {
       .sort((left, right) => right.started_at.localeCompare(left.started_at))
       .slice(0, Math.max(1, Math.min(limit, 100)));
   }
+
+  async hasDocumentQualityGateAttempt(identity: Identity, attemptKey: string): Promise<boolean> {
+    await mkdir(this.documentQualityExperimentsDir, { recursive: true });
+    const entries = (await readdir(this.documentQualityExperimentsDir)).filter((name) => /^docqexp_[a-f0-9]{32}\.json$/.test(name));
+    for (const name of entries) {
+      const item = JSON.parse(await readFile(join(this.documentQualityExperimentsDir, name), "utf8")) as DocumentQualityExperiment;
+      const canRead = identity.roles.includes("platform_admin") || item.tenant_id === identity.tenant_id;
+      if (canRead && item.release_gate?.attempt_key === attemptKey) return true;
+    }
+    return false;
+  }
 }
