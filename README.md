@@ -110,11 +110,13 @@ Development 形成假设 → Holdout 盲测 → Regression 发布回归 → 人�
 
 针对扫描 PDF、OCR、洗料和 Chunk/Overlap 的下一条跨项目闭环，见 [文档质量 Agent 评测与优化闭环实施方案](docs/document-quality-agent-evaluation-plan.md)。该 Suite 会把 OCR、Layout、Cleaning、Chunk、Retrieval 和 Agent 分层评测，允许质量工程 Agent 在隔离环境中执行受约束的单变量实验，但不允许自动修改或发布生产索引。
 
-Document Quality Suite 已包含 17 条 Golden，分为 Development/Holdout/Regression，支持同一 Case 下多份独立文档竞争，故障注入覆盖 OCR 错字、洗料误删、Chunk 边界、相似型号、版本冲突、废止通知和低质量文档误发布。评测可以显式选择实际执行层，未运行的 Retrieval/Safety 不会被伪装成通过；Baseline/Candidate 对比器只有在 Candidate 硬门禁通过且没有新增回退时才建议晋级。契约验证见 [Phase A 报告](docs/document-quality-phase-a-report.md)；真实 OCR/清洗/切块 Artifact 的 `400/100 → 700/80` 实验见 [Phase B 报告](docs/document-quality-phase-b-report.md)；Qwen、Milvus 与 Rerank 的隔离 Retrieval 对照见 [Phase C 报告](docs/document-quality-phase-c-report.md)。
+Document Quality Suite 已包含 21 条 Golden，分为 Development/Holdout/Regression，支持同一 Case 下多份独立文档竞争，故障注入覆盖 OCR 错字、洗料误删、Chunk 边界、相似型号、版本冲突、废止通知、标识符边界和低质量文档误发布。评测可以显式选择实际执行层，未运行的 Retrieval/Safety 不会被伪装成通过；Baseline/Candidate 对比器只有在 Candidate 硬门禁通过且没有新增回退时才建议晋级。契约验证见 [Phase A 报告](docs/document-quality-phase-a-report.md)；真实 OCR/清洗/切块 Artifact 的 `400/100 → 700/80` 实验见 [Phase B 报告](docs/document-quality-phase-b-report.md)；Qwen、Milvus 与 Rerank 的隔离 Retrieval 对照见 [Phase C 报告](docs/document-quality-phase-c-report.md)。
 
 Phase D 已加入绑定父实验、数据 Snapshot 与 Candidate Fingerprint 的一次性 Holdout。首轮真实结果不是全绿：`v1.4.0` Holdout 为 `2/3`，低对比扫描因 Paddle 输出 `block_order=null` 触发 Adapter 排序异常，发布被 HOLD；重复提交同一候选返回 `409`。修复后把不同型号样本转为 Development Bad Case，`v1.5.0` 实际得到 `4/5 → 5/5`，但没有重跑已经看过的 Holdout，因此仍未宣称可发布。完整证据、实验 ID、指标和复现命令见 [Phase D Holdout 报告](docs/document-quality-phase-d-holdout-report.md)。
 
 Phase E 将 Artifact 升级为一条 Case 可包含多份独立文档。新的未见 Holdout 使用同型号不同版本、基础型号与 Pro、当前与废止通知进行真实竞争，结果为 `0/3`：Hit@5 和证据完整率均为 `1.0`，但错误文档数为 `4`，证明常规召回指标会掩盖适用范围风险。修复在 Milvus 检索前应用服务端最长型号、显式版本和批次过滤，并把 `applied_scope` 写入 Trace；不同设备 Development 回归得到 `7/8 → 8/8`、MRR=`1.0`、Wrong Document=`0`。原 Holdout 已标记 `exposed` 并禁止复用，完整过程见 [Phase E 多文档范围过滤报告](docs/document-quality-phase-e-multidoc-scope-report.md)。
+
+Phase F 没有重跑 Phase E 已曝光的盲测，而是构造 4 个全新 Case、8 份文档，独立验证短型号/长型号、基础型号/扩展型号、`4.2/14.2` 和前缀批次号。一次性真实 Holdout 得到 `3/4 → 4/4`，Hit@5=`1.0`、MRR=`1.0`、Wrong Document=`0`、证据跨度 `0.75 → 1.0`；重复提交同一 Candidate/Snapshot 返回 `409`，平台进入 `regression-ready`。完整冻结链路、延迟边界和面试表述见 [Phase F 独立 Holdout 报告](docs/document-quality-phase-f-independent-holdout-report.md)。
 
 现在这条闭环已经进入网页工作台：在 RAG 项目分别导出 `400/100` 与 `700/80` 的无索引 Artifact 后，可直接上传到 `/document-quality`。平台强制检查两组 Artifact 的 OCR、Layout、Cleaner 产物完全一致，只允许 Chunk Profile 变化。真实 Retrieval 结果中，两组 Document Hit@5 和 MRR 都是 `1.0`，但新加的单 Chunk 证据完整率从 `0 → 1.0`，证明“检索到正确文档”仍可能无法回答完整步骤；候选同时保持 Development `3/4 → 4/4`、Answer Span `0.75 → 1.00`、Embedding Amplification `1.0734 → 1.0299`。后续真实复跑又验证了 XLSX `兼容矩阵 / A1:C1,A3:C3` 的结构化引用，`retrieval_source_locator_accuracy=1.0`；错误单元格范围会直接 HOLD。结论仍只是“有资格进入 Holdout”，不是“已得到生产最优参数”。操作和安全边界见 [Document Quality Lab](docs/document-quality-lab.md)。
 

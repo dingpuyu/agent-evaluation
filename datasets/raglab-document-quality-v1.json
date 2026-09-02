@@ -2,10 +2,10 @@
   "schema": "agent-evaluation.document-quality.dataset.v1",
   "suite_id": "raglab.document-quality.v1",
   "dataset_id": "raglab-document-quality-v1",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "domain": "medical-device-documentation",
   "language": "zh-CN",
-  "provenance": "synthetic-multi-document-unseen-holdout-and-confirmed-ocr-regression",
+  "provenance": "synthetic-independent-identifier-boundary-holdout-and-confirmed-regression",
   "contains_patient_data": false,
   "description": "医疗设备文档处理流水线冻结集，覆盖 OCR、版面、保守洗料、Chunk 边界、多文档版本冲突、相似型号、废止通知和来源定位；全部为合成数据，不用于真实设备操作或临床决策。",
   "split_policy": {
@@ -16,15 +16,15 @@
       "status": "development"
     },
     "holdout": {
-      "purpose": "全新未见的多文档版本、相似型号与废止通知盲测，防止针对可见页面过拟合。",
+      "purpose": "独立验证型号、版本和批次标识符边界及最长型号选择，防止针对已曝光标识符过拟合。",
       "prompt_visible": false,
-      "case_count": 3,
-      "status": "exposed"
+      "case_count": 4,
+      "status": "sealed"
     },
     "regression": {
       "purpose": "固化高置信度错字、相似型号误删和低质量文档误发布。",
       "prompt_visible": true,
-      "case_count": 6,
+      "case_count": 9,
       "status": "development"
     }
   },
@@ -233,7 +233,7 @@
     },
     {
       "case_id": "holdout-version-conflict-004",
-      "split": "holdout",
+      "split": "regression",
       "source_group": "synthetic-vsm450-network-version-conflict",
       "input_variant": "two-markdown-revisions-same-model-error-code",
       "expected_status": "ready",
@@ -252,7 +252,7 @@
     },
     {
       "case_id": "holdout-similar-model-005",
-      "split": "holdout",
+      "split": "regression",
       "source_group": "synthetic-vsm410-similar-model-power",
       "input_variant": "two-docx-similar-models-same-error-code",
       "expected_status": "ready",
@@ -271,7 +271,7 @@
     },
     {
       "case_id": "holdout-superseded-notice-006",
-      "split": "holdout",
+      "split": "regression",
       "source_group": "synthetic-c3-field-notice-supersedes",
       "input_variant": "two-html-revisions-overlapping-notice",
       "expected_status": "ready",
@@ -285,6 +285,82 @@
           "required_document_ids": ["synthetic-c3-field-notice-r3"],
           "forbidden_document_ids": ["synthetic-c3-field-notice-r1"],
           "required_content_spans": ["停止销售库存并由授权人员安装绝缘垫片套件 FSN-K26"]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-model-boundary-007",
+      "split": "holdout",
+      "source_group": "synthetic-vsm520-model-boundary",
+      "input_variant": "two-docx-prefix-models-same-error-code",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-520", "VSM-52", "TMP-SNS-118"],
+      "protected_text": ["导出 VSM-520 温度趋势并校准双传感器通道", "检查 VSM-52 单传感器连接"],
+      "required_chunk_spans": ["TMP-SNS-118 处理：导出 VSM-520 温度趋势并校准双传感器通道。"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-vsm520-ascii-boundary-query",
+          "query": "VSM-520 出现 TMP-SNS-118 后应该如何处理？",
+          "required_document_ids": ["synthetic-vsm520-temperature-r1"],
+          "forbidden_document_ids": ["synthetic-vsm52-temperature-r1"],
+          "required_content_spans": ["TMP-SNS-118 处理：导出 VSM-520 温度趋势并校准双传感器通道。"]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-longest-model-008",
+      "split": "holdout",
+      "source_group": "synthetic-n17-elite-model-boundary",
+      "input_variant": "two-html-base-and-elite-same-error-code",
+      "expected_status": "ready",
+      "critical_fields": ["BeneVision N17 Elite", "BeneVision N17", "NET-GW-052"],
+      "protected_text": ["在 Elite 扩展网络页重新绑定双网关并验证离线续传", "在标准网络页检查单网关地址"],
+      "required_chunk_spans": ["NET-GW-052 处理：在 Elite 扩展网络页重新绑定双网关并验证离线续传。"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-n17-elite-longest-model-query",
+          "query": "BeneVision N17 Elite 报 NET-GW-052 时需要做什么？",
+          "required_document_ids": ["synthetic-n17-elite-network-r1"],
+          "forbidden_document_ids": ["synthetic-n17-network-r1"],
+          "required_content_spans": ["NET-GW-052 处理：在 Elite 扩展网络页重新绑定双网关并验证离线续传。"]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-version-boundary-009",
+      "split": "holdout",
+      "source_group": "synthetic-vsm480-version-boundary",
+      "input_variant": "two-markdown-revisions-4.2-versus-14.2",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-480", "14.2", "4.2", "CAL-LINK-914"],
+      "protected_text": ["不得安装软件 4.2 的旧版校准包", "仅适用于 VSM-480 软件 4.2"],
+      "required_chunk_spans": ["CAL-LINK-914 当前处理流程：仅适用于 VSM-480 软件 14.2。先在维护界面导出校准日志、设备序列号、传感器板修订和告警时间，禁止直接清除校准记录；随后核对校准基座连接、电源状态和环境温度，确认现场没有把软件 4.2 的旧版校准包复制到 14.2。由备用设备接管监护后，停止趋势上传服务，验证当前签名包的哈希，再加载 14.2 校准配置并依次执行零点、量程和漂移检查。若签名校验失败，只允许从批准工单重新获取 14.2 包，不得安装软件 4.2 的旧版校准包。恢复服务后连续观察二十分钟，确认 CAL-LINK-914 不再出现，并验证本地显示、中央站同步和审计日志时间一致。最后记录变更前后校准值、软件版本 14.2、签名包哈希、测试结果和复核人员。此外还要分别保存零点、量程、漂移三组原始测量值，核对传感器板序列号与工单配置一致，并在交接前由第二名授权工程师复核运行日志；不得以一次成功校准替代连续观察，也不得省略中央站离线重连测试。任一检查失败都必须恢复变更前配置并升级厂商支持。"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-vsm480-version-boundary-query",
+          "query": "VSM-480 软件 14.2 出现 CAL-LINK-914 后完整恢复和验证步骤是什么？",
+          "required_document_ids": ["synthetic-vsm480-calibration-r5"],
+          "forbidden_document_ids": ["synthetic-vsm480-calibration-r2"],
+          "required_content_spans": ["CAL-LINK-914 当前处理流程：仅适用于 VSM-480 软件 14.2。先在维护界面导出校准日志、设备序列号、传感器板修订和告警时间，禁止直接清除校准记录；随后核对校准基座连接、电源状态和环境温度，确认现场没有把软件 4.2 的旧版校准包复制到 14.2。由备用设备接管监护后，停止趋势上传服务，验证当前签名包的哈希，再加载 14.2 校准配置并依次执行零点、量程和漂移检查。若签名校验失败，只允许从批准工单重新获取 14.2 包，不得安装软件 4.2 的旧版校准包。恢复服务后连续观察二十分钟，确认 CAL-LINK-914 不再出现，并验证本地显示、中央站同步和审计日志时间一致。最后记录变更前后校准值、软件版本 14.2、签名包哈希、测试结果和复核人员。此外还要分别保存零点、量程、漂移三组原始测量值，核对传感器板序列号与工单配置一致，并在交接前由第二名授权工程师复核运行日志；不得以一次成功校准替代连续观察，也不得省略中央站离线重连测试。任一检查失败都必须恢复变更前配置并升级厂商支持。"]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-lot-boundary-010",
+      "split": "holdout",
+      "source_group": "synthetic-c7-lot-boundary",
+      "input_variant": "two-html-prefix-lots-same-notice",
+      "expected_status": "ready",
+      "critical_fields": ["BeneHeart C7", "LOT-P28010", "LOT-P2801", "C7-FSN-031"],
+      "protected_text": ["隔离库存并由授权人员安装电极接口加固件 C7-P28", "历史批次只执行外观检查"],
+      "required_chunk_spans": ["隔离库存并由授权人员安装电极接口加固件 C7-P28。"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-c7-lot-boundary-query",
+          "query": "BeneHeart C7 批次 LOT-P28010 对 C7-FSN-031 应采取什么措施？",
+          "required_document_ids": ["synthetic-c7-field-notice-r4"],
+          "forbidden_document_ids": ["synthetic-c7-field-notice-r1"],
+          "required_content_spans": ["隔离库存并由授权人员安装电极接口加固件 C7-P28。"]
         }
       ]
     },

@@ -33,9 +33,9 @@
       <section class="dq-card experiment-card">
         <header><div><p class="eyebrow">01 / SINGLE-VARIABLE EXPERIMENT</p><h2>上传 Pipeline Artifact</h2></div><span class="dq-chip safe">RAW NOT PERSISTED</span></header>
         <div class="dq-split-lock">
-          <div class="enabled"><small>DEVELOPMENT</small><b>可调试</b><span>4 条公开问题 · 可反复运行</span></div>
-          <div><small>HOLDOUT</small><b>已锁定</b><span>问题与期望不暴露</span></div>
-          <div><small>REGRESSION</small><b>已锁定</b><span>仅发布门禁使用</span></div>
+          <div class="enabled"><small>DEVELOPMENT</small><b>可调试</b><span id="developmentSplitSummary">加载中…</span></div>
+          <div id="holdoutSplitCard"><small>HOLDOUT</small><b id="holdoutSplitStatus">已锁定</b><span id="holdoutSplitSummary">加载中…</span></div>
+          <div id="regressionSplitCard"><small>REGRESSION</small><b id="regressionSplitStatus">已锁定</b><span id="regressionSplitSummary">加载中…</span></div>
         </div>
         <div class="artifact-grid">
           <label class="artifact-drop baseline">
@@ -60,9 +60,9 @@
         <header><p class="eyebrow">02 / QUALITY POLICY</p><h2>不可绕过的实验规则</h2></header>
         <ol id="guardrails"><li>加载中…</li></ol>
         <div class="promotion-ladder">
-          <span class="done">Development</span><i>→</i><span>Holdout</span><i>→</i><span>Regression</span><i>→</i><span>Release</span>
+          <span class="done" id="developmentStage">Development</span><i>→</i><span id="holdoutStage">Holdout</span><i>→</i><span id="regressionStage">Regression</span><i>→</i><span id="releaseStage">Release</span>
         </div>
-        <p>当前平台实现到 <b>Development Retrieval</b>。盲测与发布门禁保持锁定，防止把评测集当训练集使用。</p>
+        <p id="currentStageText">正在读取当前 Snapshot 的发布阶段…</p>
       </aside>
     </div>
 

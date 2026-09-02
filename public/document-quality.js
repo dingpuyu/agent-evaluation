@@ -40,6 +40,21 @@ function renderCatalog() {
   $("#datasetName").textContent = `${catalog.dataset.id}@${catalog.dataset.version}`;
   $("#datasetSnapshot").textContent = catalog.dataset.snapshot;
   $("#datasetCases").textContent = `${catalog.dataset.cases} cases · 无患者数据 · ${catalog.dataset.provenance}`;
+  const splits = catalog.dataset.splits;
+  $("#developmentSplitSummary").textContent = `${splits.development.case_count} 条公开用例 · 可反复运行`;
+  $("#holdoutSplitSummary").textContent = `${splits.holdout.case_count} 条隐藏用例 · ${splits.holdout.attempt_status || splits.holdout.status}`;
+  $("#regressionSplitSummary").textContent = `${splits.regression.case_count} 条冻结回归 · 仅发布门禁使用`;
+  const regressionReady = catalog.current_stage === "regression-ready";
+  $("#holdoutStage").classList.toggle("done", regressionReady);
+  $("#holdoutSplitCard").classList.toggle("enabled", regressionReady);
+  $("#holdoutSplitStatus").textContent = regressionReady ? "一次性通过" : "已锁定";
+  $("#regressionSplitCard").classList.toggle("enabled", regressionReady);
+  $("#regressionSplitStatus").textContent = regressionReady ? "待执行" : "已锁定";
+  $("#currentStageText").innerHTML = regressionReady
+    ? "当前 Snapshot 已通过一次性 <b>Holdout</b>，候选参数已冻结；下一步只能运行 Regression，不能再次查看盲测调参。"
+    : catalog.current_stage === "new-holdout-required"
+      ? "上一轮 Holdout 已曝光，必须创建新的未见数据后才能继续晋级。"
+      : "Development 通过后才允许服务端消费一次 <b>Holdout</b>；网页不能直接读取隐藏问题。";
   $("#pipeline").innerHTML = catalog.pipeline.map((name, index) => `<article class="active"><i>0${index + 1}</i><b>${h(name)}</b><small>${index === 4 ? "Qwen → Milvus Hybrid → Rerank" : "本次实验计算并纳入门禁"}</small></article>`).join("");
   $("#guardrails").innerHTML = catalog.guardrails.map((item) => `<li>${h(item)}</li>`).join("");
   state.experiments = catalog.experiments || [];

@@ -31,10 +31,12 @@ def main() -> None:
     catalog = request_json(base + "/api/v1/document-quality/catalog", token=login["access_token"])
     with urllib.request.urlopen(base + "/document-quality", timeout=30) as response:
         page = response.read().decode("utf-8")
-    if catalog.get("current_stage") != "new-holdout-required" or catalog.get("dataset", {}).get("cases") != 17:
+    if catalog.get("current_stage") not in {"sealed-holdout-gate", "regression-ready"} or catalog.get("dataset", {}).get("cases") != 21:
         raise RuntimeError("document quality catalog is incomplete")
-    if catalog.get("dataset", {}).get("splits", {}).get("holdout", {}).get("status") != "exposed":
-        raise RuntimeError("exposed Holdout must be frozen against reuse")
+    if catalog.get("dataset", {}).get("splits", {}).get("holdout", {}).get("status") != "sealed":
+        raise RuntimeError("the independent Holdout must remain sealed")
+    if catalog.get("current_stage") == "regression-ready" and catalog.get("dataset", {}).get("splits", {}).get("holdout", {}).get("attempt_status") != "consumed_pass":
+        raise RuntimeError("a passed Holdout must expose its consumed attempt state")
     if not {"retrieval", "safety"}.issubset(catalog.get("evaluated_layers", [])):
         raise RuntimeError("document quality retrieval/safety layers are unavailable")
     if "Document Quality Lab" not in page:

@@ -66,35 +66,41 @@ function holdoutBundle(dataset: Awaited<ReturnType<typeof loadDocumentQualityDat
     schema: "agent-evaluation.document-quality.artifacts.v2",
     config: { max_runes: maxRunes, overlap_runes: overlapRunes, pipeline_release: "release-v1", observed_parsers: ["native@1"] },
     artifacts: [
+      artifact("holdout-model-boundary-007", "synthetic-vsm520-temperature-r1", [
+        { block_type: "paragraph", text: "VSM-520 TMP-SNS-118 处理：导出 VSM-520 温度趋势并校准双传感器通道。" },
+      ], [{ chunk_id: `vsm520-${maxRunes}`, parent_id: "vsm520", content: "VSM-520 TMP-SNS-118 处理：导出 VSM-520 温度趋势并校准双传感器通道。", parent_content: "VSM-520 TMP-SNS-118 处理：导出 VSM-520 温度趋势并校准双传感器通道。" }]),
+      artifact("holdout-model-boundary-007", "synthetic-vsm52-temperature-r1", [
+        { block_type: "paragraph", text: "VSM-52 TMP-SNS-118 处理：检查 VSM-52 单传感器连接。" },
+      ], [{ chunk_id: `vsm52-${maxRunes}`, parent_id: "vsm52", content: "VSM-52 TMP-SNS-118 处理：检查 VSM-52 单传感器连接。", parent_content: "VSM-52 TMP-SNS-118 处理：检查 VSM-52 单传感器连接。" }]),
+      artifact("holdout-longest-model-008", "synthetic-n17-elite-network-r1", [
+        { block_type: "paragraph", text: "BeneVision N17 Elite NET-GW-052 处理：在 Elite 扩展网络页重新绑定双网关并验证离线续传。" },
+      ], [{ chunk_id: `n17-elite-${maxRunes}`, parent_id: "n17-elite", content: "BeneVision N17 Elite NET-GW-052 处理：在 Elite 扩展网络页重新绑定双网关并验证离线续传。", parent_content: "BeneVision N17 Elite NET-GW-052 处理：在 Elite 扩展网络页重新绑定双网关并验证离线续传。" }]),
+      artifact("holdout-longest-model-008", "synthetic-n17-network-r1", [
+        { block_type: "paragraph", text: "BeneVision N17 NET-GW-052 处理：在标准网络页检查单网关地址。" },
+      ], [{ chunk_id: `n17-${maxRunes}`, parent_id: "n17", content: "BeneVision N17 NET-GW-052 处理：在标准网络页检查单网关地址。", parent_content: "BeneVision N17 NET-GW-052 处理：在标准网络页检查单网关地址。" }]),
       ...(() => {
-        const span = dataset.cases.find((item) => item.case_id === "holdout-version-conflict-004")?.required_chunk_spans?.[0] ?? "";
+        const span = dataset.cases.find((item) => item.case_id === "holdout-version-boundary-009")?.required_chunk_spans?.[0] ?? "";
         const currentChunks = maxRunes < 700
           ? [
-            { chunk_id: `vsm450-r3-${maxRunes}-a`, parent_id: "vsm450-r3", content: span.slice(0, 220), parent_content: span },
-            { chunk_id: `vsm450-r3-${maxRunes}-b`, parent_id: "vsm450-r3", content: span.slice(180), parent_content: span },
+            { chunk_id: `vsm480-r5-${maxRunes}-a`, parent_id: "vsm480-r5", content: span.slice(0, 330), parent_content: span },
+            { chunk_id: `vsm480-r5-${maxRunes}-b`, parent_id: "vsm480-r5", content: span.slice(300), parent_content: span },
           ]
-          : [{ chunk_id: `vsm450-r3-${maxRunes}`, parent_id: "vsm450-r3", content: span, parent_content: span }];
+          : [{ chunk_id: `vsm480-r5-${maxRunes}`, parent_id: "vsm480-r5", content: span, parent_content: span }];
         return [
-          artifact("holdout-version-conflict-004", "synthetic-vsm450-network-r3", [
+          artifact("holdout-version-boundary-009", "synthetic-vsm480-calibration-r5", [
             { block_type: "paragraph", text: span },
           ], currentChunks),
-          artifact("holdout-version-conflict-004", "synthetic-vsm450-network-r2", [
-            { block_type: "paragraph", text: "VSM-450 软件 3.8 NET-LINK-204 此修订已被 4.2 网络恢复流程取代" },
-          ], [{ chunk_id: `vsm450-r2-${maxRunes}`, parent_id: "vsm450-r2", content: "VSM-450 软件 3.8 NET-LINK-204 此修订已被 4.2 网络恢复流程取代", parent_content: "VSM-450 软件 3.8 NET-LINK-204 此修订已被 4.2 网络恢复流程取代" }]),
+          artifact("holdout-version-boundary-009", "synthetic-vsm480-calibration-r2", [
+            { block_type: "paragraph", text: "CAL-LINK-914 历史处理流程：仅适用于 VSM-480 软件 4.2。此修订已被 14.2 校准流程取代" },
+          ], [{ chunk_id: `vsm480-r2-${maxRunes}`, parent_id: "vsm480-r2", content: "CAL-LINK-914 历史处理流程：仅适用于 VSM-480 软件 4.2。此修订已被 14.2 校准流程取代", parent_content: "CAL-LINK-914 历史处理流程：仅适用于 VSM-480 软件 4.2。此修订已被 14.2 校准流程取代" }]),
         ];
       })(),
-      artifact("holdout-similar-model-005", "synthetic-vsm410-pro-power-r1", [
-        { block_type: "paragraph", text: "VSM-410 Pro PWR-017 处理：保留增强电源模块日志并检查双路输入。" },
-      ], [{ chunk_id: `pro-${maxRunes}`, parent_id: "pro", content: "VSM-410 Pro PWR-017 处理：保留增强电源模块日志并检查双路输入。", parent_content: "VSM-410 Pro PWR-017 处理：保留增强电源模块日志并检查双路输入。" }]),
-      artifact("holdout-similar-model-005", "synthetic-vsm410-power-r1", [
-        { block_type: "paragraph", text: "VSM-410 PWR-017 处理：检查标准电源模块和单路输入。" },
-      ], [{ chunk_id: `base-${maxRunes}`, parent_id: "base", content: "VSM-410 PWR-017 处理：检查标准电源模块和单路输入。", parent_content: "VSM-410 PWR-017 处理：检查标准电源模块和单路输入。" }]),
-      artifact("holdout-superseded-notice-006", "synthetic-c3-field-notice-r3", [
-        { block_type: "paragraph", text: "BeneHeart C3 C3-FSN-026 Revision 3 当前有效 LOT-K2608 停止销售库存并由授权人员安装绝缘垫片套件 FSN-K26" },
-      ], [{ chunk_id: `notice-r3-${maxRunes}`, parent_id: "notice-r3", content: "BeneHeart C3 C3-FSN-026 Revision 3 当前有效 LOT-K2608 停止销售库存并由授权人员安装绝缘垫片套件 FSN-K26", parent_content: "BeneHeart C3 C3-FSN-026 Revision 3 当前有效 LOT-K2608 停止销售库存并由授权人员安装绝缘垫片套件 FSN-K26" }]),
-      artifact("holdout-superseded-notice-006", "synthetic-c3-field-notice-r1", [
-        { block_type: "paragraph", text: "BeneHeart C3 C3-FSN-026 Revision 1 已被 Revision 3 取代 LOT-K2501" },
-      ], [{ chunk_id: `notice-r1-${maxRunes}`, parent_id: "notice-r1", content: "BeneHeart C3 C3-FSN-026 Revision 1 已被 Revision 3 取代 LOT-K2501", parent_content: "BeneHeart C3 C3-FSN-026 Revision 1 已被 Revision 3 取代 LOT-K2501" }]),
+      artifact("holdout-lot-boundary-010", "synthetic-c7-field-notice-r4", [
+        { block_type: "paragraph", text: "BeneHeart C7 C7-FSN-031 Revision 4 当前有效 LOT-P28010 隔离库存并由授权人员安装电极接口加固件 C7-P28。" },
+      ], [{ chunk_id: `c7-r4-${maxRunes}`, parent_id: "c7-r4", content: "BeneHeart C7 C7-FSN-031 Revision 4 当前有效 LOT-P28010 隔离库存并由授权人员安装电极接口加固件 C7-P28。", parent_content: "BeneHeart C7 C7-FSN-031 Revision 4 当前有效 LOT-P28010 隔离库存并由授权人员安装电极接口加固件 C7-P28。" }]),
+      artifact("holdout-lot-boundary-010", "synthetic-c7-field-notice-r1", [
+        { block_type: "paragraph", text: "BeneHeart C7 C7-FSN-031 Revision 1 已被 Revision 4 取代 LOT-P2801 历史批次只执行外观检查。" },
+      ], [{ chunk_id: `c7-r1-${maxRunes}`, parent_id: "c7-r1", content: "BeneHeart C7 C7-FSN-031 Revision 1 已被 Revision 4 取代 LOT-P2801 历史批次只执行外观检查。", parent_content: "BeneHeart C7 C7-FSN-031 Revision 1 已被 Revision 4 取代 LOT-P2801 历史批次只执行外观检查。" }]),
     ],
   };
 }
@@ -159,9 +165,10 @@ function sandboxResult(request: RetrievalSandboxRequest): RetrievalSandboxRun {
     ["dev-vsm460-current-version-scope-query", "synthetic-vsm460-network-r4"],
     ["dev-vsm420-pro-model-scope-query", "synthetic-vsm420-pro-power-r1"],
     ["dev-c5-current-lot-scope-query", "synthetic-c5-field-notice-r2"],
-    ["holdout-vsm450-current-version-query", "synthetic-vsm450-network-r3"],
-    ["holdout-vsm410-pro-power-query", "synthetic-vsm410-pro-power-r1"],
-    ["holdout-c3-current-notice-query", "synthetic-c3-field-notice-r3"],
+    ["holdout-vsm520-ascii-boundary-query", "synthetic-vsm520-temperature-r1"],
+    ["holdout-n17-elite-longest-model-query", "synthetic-n17-elite-network-r1"],
+    ["holdout-vsm480-version-boundary-query", "synthetic-vsm480-calibration-r5"],
+    ["holdout-c7-lot-boundary-query", "synthetic-c7-field-notice-r4"],
   ]);
   return {
     schema: "raglab.retrieval-sandbox.run.v1",
@@ -247,10 +254,14 @@ test("runs a frozen one-time Holdout gate and blocks non-ready artifacts from in
     candidate_retrieval: sandboxResult(prepared.candidate_request),
   });
   assert.equal(result.dataset.split, "holdout");
-  assert.equal(result.promotion_status, "holdout_passed");
+  assert.equal(result.promotion_status, "holdout_passed", JSON.stringify({
+    failed_cases: result.candidate_report.failed_cases,
+    layer_failures: result.candidate_report.layer_failures,
+    results: result.candidate_report.results,
+  }));
   assert.equal(result.release_gate?.verdict, "pass");
   assert.equal(result.candidate_report.metrics.find((item) => item.name === "unsafe_publish_count")?.value, 0);
-  assert.equal(result.retrieval_sandbox?.candidate.chunks_indexed, 6);
+  assert.equal(result.retrieval_sandbox?.candidate.chunks_indexed, 8);
   dataset.split_policy.holdout.status = "exposed";
   assert.throws(() => prepareDocumentQualityHoldoutGate({
     dataset,

@@ -165,6 +165,12 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/v1/document-quality/catalog") {
       const { identity } = await adminContext(request);
       const dataset = await loadDocumentQualityDataset(config.documentQualityDatasetPath);
+      const experiments = await store.listDocumentQualityExperiments(identity, 20);
+      const holdoutPassed = experiments.some((item) => item.dataset.snapshot === dataset.snapshot_id
+        && item.dataset.split === "holdout" && item.promotion_status === "holdout_passed");
+      const currentStage = dataset.split_policy.holdout.status === "exposed"
+        ? "new-holdout-required"
+        : holdoutPassed ? "regression-ready" : "sealed-holdout-gate";
       writeJSON(response, 200, {
         suite_id: dataset.suite_id,
         dataset: {
@@ -180,14 +186,16 @@ const server = createServer(async (request, response) => {
             case_count: policy.case_count,
             prompt_visible: policy.prompt_visible,
             status: policy.status ?? (name === "holdout" ? "sealed" : "development"),
+            attempt_status: name === "holdout" ? (holdoutPassed ? "consumed_pass" : "available") : undefined,
             interactive_access: name === "development" ? "enabled" : "locked",
           }])),
         },
         evaluated_layers: [...DOCUMENT_RETRIEVAL_LAYERS],
         pipeline: ["OCR", "Layout", "Cleaner", "Chunk", "Retrieval"],
-        current_stage: dataset.split_policy.holdout.status === "exposed" ? "new-holdout-required" : "sealed-holdout-gate",
+        current_stage: currentStage,
         guardrails: [
           ...(dataset.split_policy.holdout.status === "exposed" ? ["当前 Holdout 已曝光并冻结，必须创建新的未见数据后才能再次晋级"] : []),
+          ...(holdoutPassed ? ["当前 Snapshot 的一次性 Holdout 已通过并冻结，下一步只能执行 Regression，不能再次消费盲测"] : []),
           "Development 可反复调参；Holdout 只能引用已通过的 Development Retrieval 由服务端门禁触发，Regression 暂不开放",
           "同一 Candidate Fingerprint 与 Dataset Snapshot 只允许一次 Holdout 质量判定；基础设施失败才可重试",
           "Baseline 与 Candidate 必须拥有相同的 OCR、版面和清洗产物",
@@ -195,7 +203,7 @@ const server = createServer(async (request, response) => {
           "Retrieval 使用服务端生成的临时 Milvus Collection，Qwen/Milvus/Rerank 完成后必须清理",
           "Development 通过只代表可申请盲测，不代表可直接发布生产",
         ],
-        experiments: await store.listDocumentQualityExperiments(identity, 20),
+        experiments,
       });
       return;
     }
