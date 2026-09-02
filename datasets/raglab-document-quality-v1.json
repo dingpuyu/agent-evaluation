@@ -2,27 +2,30 @@
   "schema": "agent-evaluation.document-quality.dataset.v1",
   "suite_id": "raglab.document-quality.v1",
   "dataset_id": "raglab-document-quality-v1",
-  "version": "1.5.0",
+  "version": "1.7.0",
   "domain": "medical-device-documentation",
   "language": "zh-CN",
-  "provenance": "synthetic-and-confirmed-ocr-regression",
+  "provenance": "synthetic-multi-document-unseen-holdout-and-confirmed-ocr-regression",
   "contains_patient_data": false,
-  "description": "医疗设备文档处理流水线首版冻结集，覆盖 OCR 关键字段、版面顺序、保守洗料、Chunk 边界、来源页和错误型号隔离；全部为合成数据，不用于真实设备操作或临床决策。",
+  "description": "医疗设备文档处理流水线冻结集，覆盖 OCR、版面、保守洗料、Chunk 边界、多文档版本冲突、相似型号、废止通知和来源定位；全部为合成数据，不用于真实设备操作或临床决策。",
   "split_policy": {
     "development": {
-      "purpose": "形成 OCR、Cleaning 与 Chunk 单变量优化假设。",
+      "purpose": "形成 OCR、Cleaning、Chunk 与精确范围过滤的单变量优化假设。",
       "prompt_visible": true,
-      "case_count": 5
+      "case_count": 8,
+      "status": "development"
     },
     "holdout": {
-      "purpose": "按源文档组隔离的盲测文档，防止针对可见页面过拟合。",
+      "purpose": "已执行并曝光的多文档版本、相似型号与废止通知盲测；仅保留审计，禁止复用为晋级证据。",
       "prompt_visible": false,
-      "case_count": 3
+      "case_count": 3,
+      "status": "exposed"
     },
     "regression": {
       "purpose": "固化高置信度错字、相似型号误删和低质量文档误发布。",
       "prompt_visible": true,
-      "case_count": 3
+      "case_count": 6,
+      "status": "development"
     }
   },
   "cases": [
@@ -120,8 +123,65 @@
       "expected_reading_order": ["BeneVision N12", "N12-DEVELOPMENT-031"]
     },
     {
+      "case_id": "dev-version-scope-filter-006",
+      "split": "development",
+      "source_group": "synthetic-vsm460-version-scope-regression",
+      "input_variant": "two-markdown-revisions-explicit-software-version",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-460", "5.1", "4.7", "NET-SYNC-311"],
+      "protected_text": ["renew the current certificate", "Superseded by revision R4"],
+      "required_chunk_spans": ["VSM-460 software 5.1 NET-SYNC-311: export diagnostics, renew the current certificate, verify gateway and time sync, then observe for 15 minutes."],
+      "retrieval_queries": [
+        {
+          "query_id": "dev-vsm460-current-version-scope-query",
+          "query": "VSM-460 software 5.1 NET-SYNC-311 recovery steps",
+          "required_document_ids": ["synthetic-vsm460-network-r4"],
+          "forbidden_document_ids": ["synthetic-vsm460-network-r3"],
+          "required_content_spans": ["VSM-460 software 5.1 NET-SYNC-311: export diagnostics, renew the current certificate, verify gateway and time sync, then observe for 15 minutes."]
+        }
+      ]
+    },
+    {
+      "case_id": "dev-model-suffix-filter-007",
+      "split": "development",
+      "source_group": "synthetic-vsm420-model-suffix-regression",
+      "input_variant": "two-docx-base-and-pro-same-error-code",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-420 Pro", "VSM-420", "PWR-017"],
+      "protected_text": ["保留增强电源日志并检查双路冗余输入", "检查标准电源模块和单路输入"],
+      "required_chunk_spans": ["PWR-017 处理：保留增强电源日志并检查双路冗余输入。"],
+      "retrieval_queries": [
+        {
+          "query_id": "dev-vsm420-pro-model-scope-query",
+          "query": "VSM-420 Pro 出现 PWR-017 应检查什么？",
+          "required_document_ids": ["synthetic-vsm420-pro-power-r1"],
+          "forbidden_document_ids": ["synthetic-vsm420-power-r1"],
+          "required_content_spans": ["PWR-017 处理：保留增强电源日志并检查双路冗余输入。"]
+        }
+      ]
+    },
+    {
+      "case_id": "dev-lot-scope-filter-008",
+      "split": "development",
+      "source_group": "synthetic-c5-lot-scope-regression",
+      "input_variant": "two-html-notices-explicit-lot",
+      "expected_status": "ready",
+      "critical_fields": ["BeneHeart C5", "LOT-M2701", "LOT-M2602"],
+      "protected_text": ["Quarantine sales stock", "Historical lot only"],
+      "required_chunk_spans": ["Quarantine sales stock and install insulation kit C5-M27."],
+      "retrieval_queries": [
+        {
+          "query_id": "dev-c5-current-lot-scope-query",
+          "query": "BeneHeart C5 lot LOT-M2701 field notice action",
+          "required_document_ids": ["synthetic-c5-field-notice-r2"],
+          "forbidden_document_ids": ["synthetic-c5-field-notice-r1"],
+          "required_content_spans": ["Quarantine sales stock and install insulation kit C5-M27."]
+        }
+      ]
+    },
+    {
       "case_id": "holdout-rotated-manual-001",
-      "split": "holdout",
+      "split": "regression",
       "source_group": "synthetic-pump-manual-r1",
       "input_variant": "scan-rotated-90deg",
       "expected_status": "ready",
@@ -141,7 +201,7 @@
     },
     {
       "case_id": "holdout-low-dpi-review-002",
-      "split": "holdout",
+      "split": "regression",
       "source_group": "synthetic-monitor-service-r1",
       "input_variant": "scan-150dpi-low-contrast",
       "expected_status": "review_required",
@@ -150,7 +210,7 @@
     },
     {
       "case_id": "holdout-docx-structure-003",
-      "split": "holdout",
+      "split": "regression",
       "source_group": "synthetic-aed-maintenance-r2",
       "input_variant": "docx-heading-list-table",
       "expected_status": "ready",
@@ -168,6 +228,63 @@
           "required_document_ids": ["synthetic-aed-maintenance-r2"],
           "required_heading_paths": [["维护前检查"]],
           "required_content_spans": ["MAINT-003 仅授权服务人员执行"]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-version-conflict-004",
+      "split": "holdout",
+      "source_group": "synthetic-vsm450-network-version-conflict",
+      "input_variant": "two-markdown-revisions-same-model-error-code",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-450", "NET-LINK-204", "软件 4.2", "软件 3.8"],
+      "protected_text": ["不得回退到旧版共享证书", "此修订已被 4.2 网络恢复流程取代"],
+      "required_chunk_spans": ["NET-LINK-204 当前处理流程：仅适用于 VSM-450 软件 4.2。先在维护界面导出网络诊断包并记录设备序列号、网卡地址和告警时间，不得直接恢复出厂设置；随后核对有线接口指示灯、交换机端口 VLAN 与网关地址，确认现场没有把 VSM-450 历史版本 3.8 的固定地址模板复制到 4.2。保持患者监护功能由备用设备接管后，依次断开数据上传服务、刷新网络证书、重新加载 4.2 配置，再执行网关连通性和时间同步测试。若证书链校验失败，只允许安装工单中批准的当前证书，不得回退到旧版共享证书。恢复连接后连续观察十五分钟，确认 NET-LINK-204 不再出现，并分别验证中央站、归档服务器和远程维护通道。最后把诊断包哈希、变更前后地址、软件版本 4.2、测试结果和复核人员写入服务记录；任一验证失败都必须恢复变更前配置并升级厂商支持。"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-vsm450-current-version-query",
+          "query": "VSM-450 软件 4.2 出现 NET-LINK-204 后完整的恢复和验证流程是什么？",
+          "required_document_ids": ["synthetic-vsm450-network-r3"],
+          "forbidden_document_ids": ["synthetic-vsm450-network-r2"],
+          "required_content_spans": ["NET-LINK-204 当前处理流程：仅适用于 VSM-450 软件 4.2。先在维护界面导出网络诊断包并记录设备序列号、网卡地址和告警时间，不得直接恢复出厂设置；随后核对有线接口指示灯、交换机端口 VLAN 与网关地址，确认现场没有把 VSM-450 历史版本 3.8 的固定地址模板复制到 4.2。保持患者监护功能由备用设备接管后，依次断开数据上传服务、刷新网络证书、重新加载 4.2 配置，再执行网关连通性和时间同步测试。若证书链校验失败，只允许安装工单中批准的当前证书，不得回退到旧版共享证书。恢复连接后连续观察十五分钟，确认 NET-LINK-204 不再出现，并分别验证中央站、归档服务器和远程维护通道。最后把诊断包哈希、变更前后地址、软件版本 4.2、测试结果和复核人员写入服务记录；任一验证失败都必须恢复变更前配置并升级厂商支持。"]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-similar-model-005",
+      "split": "holdout",
+      "source_group": "synthetic-vsm410-similar-model-power",
+      "input_variant": "two-docx-similar-models-same-error-code",
+      "expected_status": "ready",
+      "critical_fields": ["VSM-410 Pro", "VSM-410", "PWR-017"],
+      "protected_text": ["保留增强电源模块日志并检查双路输入", "检查标准电源模块和单路输入"],
+      "required_chunk_spans": ["PWR-017 处理：保留增强电源模块日志并检查双路输入。"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-vsm410-pro-power-query",
+          "query": "VSM-410 Pro 出现 PWR-017 应该检查什么？",
+          "required_document_ids": ["synthetic-vsm410-pro-power-r1"],
+          "forbidden_document_ids": ["synthetic-vsm410-power-r1"],
+          "required_content_spans": ["PWR-017 处理：保留增强电源模块日志并检查双路输入。"]
+        }
+      ]
+    },
+    {
+      "case_id": "holdout-superseded-notice-006",
+      "split": "holdout",
+      "source_group": "synthetic-c3-field-notice-supersedes",
+      "input_variant": "two-html-revisions-overlapping-notice",
+      "expected_status": "ready",
+      "critical_fields": ["BeneHeart C3", "C3-FSN-026", "LOT-K2608", "LOT-K2501"],
+      "protected_text": ["当前有效", "已被 Revision 3 取代"],
+      "required_chunk_spans": ["停止销售库存并由授权人员安装绝缘垫片套件 FSN-K26"],
+      "retrieval_queries": [
+        {
+          "query_id": "holdout-c3-current-notice-query",
+          "query": "BeneHeart C3 批次 LOT-K2608 应执行哪一版 C3-FSN-026，具体措施是什么？",
+          "required_document_ids": ["synthetic-c3-field-notice-r3"],
+          "forbidden_document_ids": ["synthetic-c3-field-notice-r1"],
+          "required_content_spans": ["停止销售库存并由授权人员安装绝缘垫片套件 FSN-K26"]
         }
       ]
     },

@@ -19,7 +19,7 @@ export const DOCUMENT_HOLDOUT_LAYERS = ["ocr", "layout", "cleaning", "chunk", "r
 type RunnableDocumentQualitySplit = "development" | "holdout";
 
 export interface DocumentArtifactBundle {
-  schema: "agent-evaluation.document-quality.artifacts.v1";
+  schema: "agent-evaluation.document-quality.artifacts.v1" | "agent-evaluation.document-quality.artifacts.v2";
   source?: Record<string, unknown>;
   config?: Record<string, unknown>;
   artifacts: DocumentPipelineArtifact[];
@@ -96,6 +96,13 @@ export interface RetrievalSandboxRequest {
     source_sheet?: string;
     source_cell_range?: string;
     heading_path?: string[];
+    model_codes?: string[];
+    software_version_from?: string;
+    software_version_to?: string;
+    document_revision?: string;
+    supersedes?: string[];
+    affected_lots?: string[];
+    authority_level?: string;
   }>;
   queries: Array<{ query_id: string; query: string; top_k: number; candidate_k: number }>;
 }
@@ -118,6 +125,7 @@ export interface RetrievalSandboxRun {
   queries: Array<{
     query_id: string;
     query: string;
+    applied_scope?: string[];
     embedding_latency_ms: number;
     search_latency_ms: number;
     rerank_latency_ms: number;
@@ -153,6 +161,7 @@ export interface RetrievalSandboxSummary {
   total_latency_ms: number;
   queries: Array<{
     query_id: string;
+    applied_scope?: string[];
     embedding_latency_ms: number;
     search_latency_ms: number;
     rerank_latency_ms: number;
@@ -206,13 +215,22 @@ function asRecord(value: unknown, name: string): Record<string, unknown> {
 
 function artifactBundle(value: unknown, name: string): DocumentArtifactBundle {
   const record = asRecord(value, name);
-  if (record.schema !== "agent-evaluation.document-quality.artifacts.v1") throw new Error(`${name} uses an unsupported schema`);
+  if (record.schema !== "agent-evaluation.document-quality.artifacts.v1" && record.schema !== "agent-evaluation.document-quality.artifacts.v2") {
+    throw new Error(`${name} uses an unsupported schema`);
+  }
   if (!Array.isArray(record.artifacts) || !record.artifacts.length) throw new Error(`${name}.artifacts must be a non-empty array`);
+  const keys = new Set<string>();
   for (const artifact of record.artifacts) {
     const item = asRecord(artifact, `${name}.artifact`);
-    if (item.schema !== "agent-evaluation.document-quality.artifact.v1" || typeof item.case_id !== "string") {
+    if ((item.schema !== "agent-evaluation.document-quality.artifact.v1" && item.schema !== "agent-evaluation.document-quality.artifact.v2") || typeof item.case_id !== "string") {
       throw new Error(`${name} contains an invalid document artifact`);
     }
+    if (item.schema === "agent-evaluation.document-quality.artifact.v2" && (typeof item.document_id !== "string" || !item.document_id)) {
+      throw new Error(`${name} v2 artifacts require document_id`);
+    }
+    const key = `${item.case_id}\u0000${typeof item.document_id === "string" ? item.document_id : item.case_id}`;
+    if (keys.has(key)) throw new Error(`${name} contains duplicate case/document artifact: ${item.case_id}/${String(item.document_id ?? item.case_id)}`);
+    keys.add(key);
     if (item.indexed !== false || !Array.isArray(item.retrieval) || item.retrieval.length !== 0) {
       throw new Error(`${name} must contain pre-index artifacts only`);
     }
@@ -249,9 +267,9 @@ function intervention(value: unknown, baseline: DocumentArtifactBundle, candidat
 
 function assertExactCaseSet(dataset: DocumentQualityDataset, bundle: DocumentArtifactBundle, name: string, split: RunnableDocumentQualitySplit): void {
   const expected = dataset.cases.filter((item) => item.split === split).map((item) => item.case_id).sort();
-  const actual = bundle.artifacts.map((item) => item.case_id).sort();
-  if (new Set(actual).size !== actual.length || JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${name} must contain every ${split} case exactly once`);
+  const actual = [...new Set(bundle.artifacts.map((item) => item.case_id))].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`${name} must contain every ${split} case and no unrelated case`);
   }
 }
 
@@ -266,7 +284,16 @@ function canonical(value: unknown): string {
 
 function frozenProfile(label: string, bundle: DocumentArtifactBundle) {
   const bundleConfig = bundle.config ?? {};
-  const fingerprint = `sha256:${createHash("sha256").update(canonical({ label, bundle_config: bundleConfig })).digest("hex")}`;
+  // Only declared release identity and controlled experiment variables belong
+  // in the promotion fingerprint. observed_parsers is corpus-dependent runtime
+  // evidence: an OCR-heavy Development split and a native DOCX Holdout can run
+  // on the same deployment without observing the same parser mix.
+  const controlledConfig = {
+    max_runes: bundleConfig.max_runes,
+    overlap_runes: bundleConfig.overlap_runes,
+    pipeline_release: bundleConfig.pipeline_release,
+  };
+  const fingerprint = `sha256:${createHash("sha256").update(canonical({ label, controlled_bundle_config: controlledConfig })).digest("hex")}`;
   return { label, bundle_config: bundleConfig, fingerprint };
 }
 
@@ -280,6 +307,7 @@ function frozenProfiles(interventionValue: DocumentQualityIntervention, baseline
 function stablePreChunkState(artifact: DocumentPipelineArtifact): string {
   return JSON.stringify({
     case_id: artifact.case_id,
+    document_id: artifact.document_id ?? artifact.case_id,
     status: artifact.status,
     blocks: artifact.blocks,
     cleaning: artifact.cleaning,
@@ -287,11 +315,13 @@ function stablePreChunkState(artifact: DocumentPipelineArtifact): string {
 }
 
 function assertSingleVariableExperiment(baseline: DocumentArtifactBundle, candidate: DocumentArtifactBundle): void {
-  const candidateByID = new Map(candidate.artifacts.map((item) => [item.case_id, item]));
+  const key = (item: DocumentPipelineArtifact) => `${item.case_id}\u0000${item.document_id ?? item.case_id}`;
+  const candidateByID = new Map(candidate.artifacts.map((item) => [key(item), item]));
+  if (baseline.artifacts.length !== candidate.artifacts.length) throw new Error("baseline and candidate must contain the same document artifacts");
   for (const item of baseline.artifacts) {
-    const counterpart = candidateByID.get(item.case_id);
+    const counterpart = candidateByID.get(key(item));
     if (!counterpart || stablePreChunkState(item) !== stablePreChunkState(counterpart)) {
-      throw new Error(`pre-chunk state differs for ${item.case_id}; the comparison is not a single-variable chunk experiment`);
+      throw new Error(`pre-chunk state differs for ${item.case_id}/${item.document_id ?? item.case_id}; the comparison is not a single-variable chunk experiment`);
     }
   }
 }
@@ -384,15 +414,22 @@ function sandboxRequest(
     if (!golden || artifact.status !== "ready") return [];
     return artifact.chunks.map((chunk) => ({
       chunk_id: chunk.chunk_id,
-      document_id: golden.source_group,
+      document_id: artifact.document_id ?? golden.source_group,
       dataset_id: dataset.dataset_id,
-      title: golden.source_group,
+      title: artifact.document_id ?? golden.source_group,
       content: chunk.content,
-      source_file: golden.source_group,
+      source_file: artifact.source_file ?? golden.source_group,
       source_page: chunk.source_page,
       source_sheet: chunk.source_sheet,
       source_cell_range: chunk.source_cell_range,
       heading_path: chunk.heading_path,
+      model_codes: artifact.metadata?.model_codes,
+      software_version_from: artifact.metadata?.software_version_from,
+      software_version_to: artifact.metadata?.software_version_to,
+      document_revision: artifact.metadata?.document_revision,
+      supersedes: artifact.metadata?.supersedes,
+      affected_lots: artifact.metadata?.affected_lots,
+      authority_level: artifact.metadata?.authority_level,
     }));
   });
   // Keep the reranker pool large enough for recall but bounded independently
@@ -445,6 +482,9 @@ export function prepareDocumentQualityHoldoutGate(input: {
   baseline_artifacts?: unknown;
   candidate_artifacts?: unknown;
 }): PreparedDocumentQualityHoldoutGate {
+  if (input.dataset.split_policy.holdout.status === "exposed") {
+    throw new Error("holdout split is exposed and cannot be reused for promotion");
+  }
   const parent = input.parent_experiment;
   if (parent.dataset.split !== "development" || parent.execution_stage !== "retrieval-sandbox" || parent.promotion_status !== "retrieval_passed") {
     throw new Error("holdout requires a passed development retrieval experiment");
@@ -567,6 +607,7 @@ function sandboxSummary(run: RetrievalSandboxRun): RetrievalSandboxSummary {
     total_latency_ms: run.total_latency_ms,
     queries: run.queries.map((query) => ({
       query_id: query.query_id,
+      applied_scope: query.applied_scope,
       embedding_latency_ms: query.embedding_latency_ms,
       search_latency_ms: query.search_latency_ms,
       rerank_latency_ms: query.rerank_latency_ms,

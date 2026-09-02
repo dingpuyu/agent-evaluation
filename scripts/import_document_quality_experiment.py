@@ -30,7 +30,10 @@ def load_bundle(path: str) -> dict:
     if not source.is_file():
         raise RuntimeError(f"artifact bundle does not exist: {source}")
     payload = json.loads(source.read_text(encoding="utf-8"))
-    if payload.get("schema") != "agent-evaluation.document-quality.artifacts.v1":
+    if payload.get("schema") not in {
+        "agent-evaluation.document-quality.artifacts.v1",
+        "agent-evaluation.document-quality.artifacts.v2",
+    }:
         raise RuntimeError(f"unsupported artifact bundle schema: {source}")
     return payload
 

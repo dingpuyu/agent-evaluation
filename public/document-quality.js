@@ -64,11 +64,11 @@ async function readBundle(input, side) {
   if (file.size > 900 * 1024) { toast("单个 Artifact Bundle 不能超过 900KB"); input.value = ""; return; }
   try {
     const bundle = JSON.parse(await file.text());
-    if (bundle.schema !== "agent-evaluation.document-quality.artifacts.v1" || !Array.isArray(bundle.artifacts)) throw new Error("不是支持的 Artifact Bundle");
+    if (!["agent-evaluation.document-quality.artifacts.v1", "agent-evaluation.document-quality.artifacts.v2"].includes(bundle.schema) || !Array.isArray(bundle.artifacts)) throw new Error("不是支持的 Artifact Bundle");
     state[side] = bundle;
     const prefix = side === "baseline" ? "baseline" : "candidate";
     $(`#${prefix}Name`).textContent = file.name;
-    $(`#${prefix}Meta`).textContent = `${bundleProfile(bundle)} · ${bundle.artifacts.length} cases · ${(file.size / 1024).toFixed(1)}KB`;
+    $(`#${prefix}Meta`).textContent = `${bundleProfile(bundle)} · ${new Set(bundle.artifacts.map((item) => item.case_id)).size} cases / ${bundle.artifacts.length} docs · ${(file.size / 1024).toFixed(1)}KB`;
     input.closest(".artifact-drop").classList.add("ready");
     const profile = bundleProfile(bundle);
     if (profile !== "配置未声明") $(`#${prefix}Label`).value = profile;
@@ -98,6 +98,8 @@ function renderResult(experiment) {
   const sandboxTrace = sandbox ? `<div class="sandbox-trace"><article><small>BASELINE RETRIEVAL</small><b>${h(sandbox.baseline.provider.embedder)} · ${sandbox.baseline.provider.dimensions}d</b><span>${h(sandbox.baseline.provider.reranker)} · ${sandbox.baseline.chunks_indexed} chunks · ${fmt(sandbox.baseline.total_latency_ms)}ms</span><code>${h(sandbox.baseline.collection_scope)} · cleanup=${sandbox.baseline.cleanup_completed}</code></article><article><small>CANDIDATE RETRIEVAL</small><b>${h(sandbox.candidate.provider.embedder)} · ${sandbox.candidate.provider.dimensions}d</b><span>${h(sandbox.candidate.provider.reranker)} · ${sandbox.candidate.chunks_indexed} chunks · ${fmt(sandbox.candidate.total_latency_ms)}ms</span><code>${h(sandbox.candidate.collection_scope)} · cleanup=${sandbox.candidate.cleanup_completed}</code></article></div>` : "";
   const locatorRows = sandbox ? sandbox.candidate.queries.flatMap((query) => query.hits.filter((hit) => hit.source_page || hit.source_sheet || hit.source_cell_range || hit.heading_path?.length).slice(0, 1).map((hit) => `<div><code>${h(query.query_id)}</code><b>${h(hit.document_id)}</b><span>${hit.source_page ? `PDF · P${h(hit.source_page)}` : `XLSX · ${h(hit.source_sheet || "—")} · ${h(hit.source_cell_range || "—")}`}</span><small>${h((hit.heading_path || []).join(" › ") || "无标题路径")}</small></div>`)) : [];
   const locatorTrace = locatorRows.length ? `<section class="locator-trace"><header><small>STRUCTURED CITATION TRACE</small><b>来源定位硬门禁</b><span>正确文档不足以通过；页码、Sheet、Cell Range 与标题路径也必须匹配 Golden。</span></header>${locatorRows.join("")}</section>` : "";
+  const scopeRows = sandbox ? sandbox.candidate.queries.filter((query) => query.applied_scope?.length).map((query) => `<div><code>${h(query.query_id)}</code><b>${h(query.applied_scope.join(" · "))}</b><span>Top‑1 ${h(query.hits[0]?.document_id || "无结果")}</span><small>在 ANN/BM25 之前由服务端应用，不依赖 LLM 自觉遵守。</small></div>`) : [];
+  const scopeTrace = scopeRows.length ? `<section class="locator-trace"><header><small>EXACT SCOPE TRACE</small><b>型号 / 版本 / 批次过滤</b><span>先缩小适用范围，再执行混合召回与重排，避免相似文档污染证据集。</span></header>${scopeRows.join("")}</section>` : "";
   const decisionTitle = split === "holdout"
     ? passed ? "一次性 Holdout 通过，可进入 Regression" : "一次性 Holdout 失败，冻结结果并阻断发布"
     : passed ? "Development Retrieval 门禁通过，可申请盲测" : "候选策略未通过，保持 Baseline";
@@ -106,7 +108,7 @@ function renderResult(experiment) {
     : passed ? "进入受控 Holdout" : "继续 Development 调参";
   $("#result").innerHTML = `<div class="decision-banner ${passed ? "" : "hold"}"><span>${passed ? "PASS" : "HOLD"}</span><div><b>${decisionTitle}</b><p>${h(experiment.comparison.recommendation)}</p></div><code>${h(experiment.experiment_id)}</code></div>
     <div class="score-strip"><article><small>BASELINE CASES</small><b>${comparison.baseline.cases_passed}/${comparison.baseline.cases_total}</b><span>${h(experiment.intervention.baseline)}</span></article><article><small>CANDIDATE CASES</small><b>${comparison.candidate.cases_passed}/${comparison.candidate.cases_total}</b><span>${h(experiment.intervention.candidate)}</span></article><article><small>FIXED / REGRESSED</small><b>${comparison.fixed_cases.length} / ${comparison.regressed_cases.length}</b><span>${h(comparison.fixed_cases.join(", ") || "无修复用例")}</span></article><article><small>PRODUCTION MUTATION</small><b>FALSE</b><span>仅产生实验记录</span></article></div>
-    ${sandboxTrace}${releaseGate}${locatorTrace}<div class="metric-table"><div class="metric-row head"><span>METRIC</span><span>BASELINE</span><span>CANDIDATE</span><span>DELTA</span><span>DIRECTION</span></div>${metrics}</div>
+    ${sandboxTrace}${releaseGate}${scopeTrace}${locatorTrace}<div class="metric-table"><div class="metric-row head"><span>METRIC</span><span>BASELINE</span><span>CANDIDATE</span><span>DELTA</span><span>DIRECTION</span></div>${metrics}</div>
     <div class="diagnosis-grid"><article><small>ROOT CAUSE DIAGNOSIS</small><h3>${h(experiment.diagnosis.root_cause_layer)} · ${Math.round(experiment.diagnosis.confidence * 100)}%</h3><ul>${experiment.diagnosis.evidence.map((item) => `<li>${h(item)}</li>`).join("")}</ul></article><article><small>NEXT ACTION</small><h3>${nextAction}</h3><p>${h(experiment.diagnosis.recommendation)}</p><p><b>人工审核：</b>${experiment.diagnosis.requires_human_review ? "必须" : "否"} · <b>原始产物落库：</b>${experiment.raw_artifacts_persisted ? "是" : "否"}</p></article></div>`;
   $("#resultSection").scrollIntoView({ behavior: "smooth", block: "start" });
 }

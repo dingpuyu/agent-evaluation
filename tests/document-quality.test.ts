@@ -61,10 +61,10 @@ function passingArtifact(): DocumentPipelineArtifact {
 
 test("loads the frozen document quality dataset with source-grouped splits", async () => {
   const dataset = await loadDocumentQualityDataset("./datasets/raglab-document-quality-v1.json");
-  assert.equal(dataset.cases.length, 11);
-  assert.equal(dataset.cases.filter((item) => item.split === "development").length, 5);
+  assert.equal(dataset.cases.length, 17);
+  assert.equal(dataset.cases.filter((item) => item.split === "development").length, 8);
   assert.equal(dataset.cases.filter((item) => item.split === "holdout").length, 3);
-  assert.equal(dataset.cases.filter((item) => item.split === "regression").length, 3);
+  assert.equal(dataset.cases.filter((item) => item.split === "regression").length, 6);
   assert.match(dataset.snapshot_id ?? "", /^sha256:[a-f0-9]{64}$/);
   for (const sourceGroup of new Set(dataset.cases.map((item) => item.source_group))) {
     assert.equal(new Set(dataset.cases.filter((item) => item.source_group === sourceGroup).map((item) => item.split)).size, 1);
@@ -164,6 +164,60 @@ test("aggregates hard gates and keeps embedding amplification soft", () => {
   const failed = evaluateDocumentQuality(dataset, [broken], "development");
   assert.equal(failed.gate_passed, false);
   assert.equal(failed.metrics.find((item) => item.name === "hard_case_failure_count")?.value, 1);
+});
+
+test("evaluates multiple competing documents as one case without losing document identity", () => {
+  const multiCase: DocumentQualityCase = {
+    ...richCase,
+    case_id: "multi-document-001",
+    expected_blocks: [],
+    expected_reading_order: [],
+    expected_removed_noise: [],
+    forbidden_normalizations: [],
+    critical_fields: ["VSM-410", "VSM-410 Pro", "PWR-017"],
+    protected_text: ["标准电源模块", "增强电源模块"],
+    required_chunk_spans: ["PWR-017 处理：检查增强电源模块"],
+    retrieval_queries: [{
+      query_id: "multi-q1",
+      query: "VSM-410 Pro 的 PWR-017 怎么处理？",
+      required_document_ids: ["vsm410-pro-r1"],
+      forbidden_document_ids: ["vsm410-r1"],
+      required_content_spans: ["PWR-017 处理：检查增强电源模块"],
+    }],
+  };
+  const base = (documentID: string, text: string): DocumentPipelineArtifact => ({
+    schema: "agent-evaluation.document-quality.artifact.v2",
+    case_id: multiCase.case_id,
+    document_id: documentID,
+    source_file: `${documentID}.docx`,
+    status: "ready",
+    indexed: true,
+    config_fingerprint: "sha256:multi",
+    blocks: [{ block_type: "paragraph", text }],
+    cleaning: { removed_blocks: [] },
+    chunks: [{ chunk_id: `${documentID}#c1`, parent_id: documentID, content: text, parent_content: text }],
+    retrieval: [{
+      query_id: "multi-q1",
+      hits: [{ document_id: "vsm410-pro-r1", content: "VSM-410 Pro PWR-017 处理：检查增强电源模块" }],
+    }],
+  });
+  const dataset = {
+    schema: "agent-evaluation.document-quality.dataset.v1",
+    suite_id: "multi", dataset_id: "multi", version: "1", domain: "test", language: "zh-CN",
+    provenance: "unit-test", contains_patient_data: false, description: "multi document",
+    split_policy: {
+      development: { purpose: "test", case_count: 1, prompt_visible: true },
+      holdout: { purpose: "test", case_count: 0, prompt_visible: false },
+      regression: { purpose: "test", case_count: 0, prompt_visible: true },
+    },
+    cases: [multiCase], snapshot_id: "sha256:multi",
+  } satisfies DocumentQualityDataset;
+  const report = evaluateDocumentQuality(dataset, [
+    base("vsm410-r1", "VSM-410 PWR-017 处理：检查标准电源模块"),
+    base("vsm410-pro-r1", "VSM-410 Pro PWR-017 处理：检查增强电源模块"),
+  ], "development");
+  assert.equal(report.gate_passed, true);
+  assert.equal(report.metrics.find((item) => item.name === "wrong_document_count")?.value, 0);
 });
 
 test("computes Unicode character error rate deterministically", () => {

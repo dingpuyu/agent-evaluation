@@ -58,7 +58,12 @@ export interface DocumentQualityDataset {
   provenance: string;
   contains_patient_data: false;
   description: string;
-  split_policy: Record<DatasetSplit, { purpose: string; case_count: number; prompt_visible: boolean }>;
+  split_policy: Record<DatasetSplit, {
+    purpose: string;
+    case_count: number;
+    prompt_visible: boolean;
+    status?: "development" | "sealed" | "exposed";
+  }>;
   cases: DocumentQualityCase[];
   snapshot_id?: string;
 }
@@ -108,8 +113,19 @@ export interface DocumentRetrievalArtifact {
 }
 
 export interface DocumentPipelineArtifact {
-  schema: "agent-evaluation.document-quality.artifact.v1";
+  schema: "agent-evaluation.document-quality.artifact.v1" | "agent-evaluation.document-quality.artifact.v2";
   case_id: string;
+  document_id?: string;
+  source_file?: string;
+  metadata?: {
+    model_codes?: string[];
+    software_version_from?: string;
+    software_version_to?: string;
+    document_revision?: string;
+    supersedes?: string[];
+    affected_lots?: string[];
+    authority_level?: string;
+  };
   dataset_id?: string;
   status: "ready" | "review_required" | "ocr_required";
   indexed: boolean;
@@ -438,11 +454,38 @@ export function evaluateDocumentQuality(
   enabledLayers: readonly DocumentFailureLayer[] = DOCUMENT_FAILURE_LAYERS,
 ): DocumentQualityReport {
   const cases = dataset.cases.filter((item) => split === "all" || item.split === split);
-  const artifactsByID = new Map(artifacts.map((artifact) => [artifact.case_id, artifact]));
+  const artifactsByID = new Map<string, DocumentPipelineArtifact[]>();
+  for (const artifact of artifacts) {
+    const group = artifactsByID.get(artifact.case_id) ?? [];
+    group.push(artifact);
+    artifactsByID.set(artifact.case_id, group);
+  }
   const results = cases.map((item) => {
-    const artifact = artifactsByID.get(item.case_id);
-    if (!artifact) throw new Error(`missing document artifact: ${item.case_id}`);
-    return evaluateDocumentCase(item, artifact, enabledLayers);
+    const caseArtifacts = artifactsByID.get(item.case_id);
+    if (!caseArtifacts?.length) throw new Error(`missing document artifact: ${item.case_id}`);
+    const ordered = [...caseArtifacts].sort((left, right) => (left.document_id ?? left.case_id).localeCompare(right.document_id ?? right.case_id));
+    const retrieval = new Map<string, DocumentRetrievalArtifact>();
+    for (const artifact of ordered) {
+      for (const entry of artifact.retrieval) if (!retrieval.has(entry.query_id)) retrieval.set(entry.query_id, entry);
+    }
+    const status = ordered.some((artifact) => artifact.status === "ocr_required")
+      ? "ocr_required"
+      : ordered.some((artifact) => artifact.status === "review_required") ? "review_required" : "ready";
+    const merged: DocumentPipelineArtifact = {
+      schema: ordered.some((artifact) => artifact.schema.endsWith(".v2"))
+        ? "agent-evaluation.document-quality.artifact.v2"
+        : "agent-evaluation.document-quality.artifact.v1",
+      case_id: item.case_id,
+      status,
+      indexed: ordered.some((artifact) => artifact.indexed),
+      config_fingerprint: [...new Set(ordered.map((artifact) => artifact.config_fingerprint))].sort().join("|"),
+      blocks: ordered.flatMap((artifact) => artifact.blocks),
+      cleaning: { removed_blocks: ordered.flatMap((artifact) => artifact.cleaning.removed_blocks) },
+      chunks: ordered.flatMap((artifact) => artifact.chunks),
+      retrieval: [...retrieval.values()],
+      runtime: { duration_ms: ordered.reduce((sum, artifact) => sum + (artifact.runtime?.duration_ms ?? 0), 0) },
+    };
+    return evaluateDocumentCase(item, merged, enabledLayers);
   });
   const sums = results.reduce((total, item) => {
     for (const key of Object.keys(total) as Array<keyof typeof total>) total[key] += item.measurements[key] as number || 0;
