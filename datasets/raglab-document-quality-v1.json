@@ -16,7 +16,7 @@
       "status": "development"
     },
     "holdout": {
-      "purpose": "已执行并曝光的多文档版本、相似型号与废止通知盲测；仅保留审计，禁止复用为晋级证据。",
+      "purpose": "全新未见的多文档版本、相似型号与废止通知盲测，防止针对可见页面过拟合。",
       "prompt_visible": false,
       "case_count": 3,
       "status": "exposed"
