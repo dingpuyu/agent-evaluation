@@ -1,5 +1,7 @@
 # Phase F：独立标识符边界 Holdout 报告
 
+> 历史报告更正：下文保留当时真实调用的结果，不改写原始记录。`document-quality/2` 审查发现该 Holdout 没有噪声清洗和来源定位标注，旧规则却把零分母算为满分。因此旧 PASS / regression-ready 不再有效，原 Snapshot 仍已消费，不能重开盲测。详见[评测可信度修复记录](document-quality-evaluator-integrity-report.md)。
+
 ## 结论
 
 `raglab-document-quality-v1@1.8.0` 的一次性 Holdout 已真实通过。候选 Chunk Profile `700/80` 在 4 个此前未参与调参的 Case 上得到 `4/4`，Baseline `400/100` 为 `3/4`；候选的 Hit@5、MRR、证据跨度完整率均为 `1.0`，`wrong_document_count=0`，没有新增回退。

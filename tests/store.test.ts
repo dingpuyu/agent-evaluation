@@ -36,11 +36,14 @@ test("persists runs and preserves tenant isolation", async () => {
     const documentExperiment = {
       experiment_id: `docqexp_${"e".repeat(32)}`, tenant_id: "tenant_a", started_at: new Date().toISOString(),
       release_gate: { attempt_key: "sha256:sealed-attempt" },
+      dataset: { snapshot: "sha256:seen-holdout" },
     } as DocumentQualityExperiment;
     await store.saveDocumentQualityExperiment(documentExperiment);
     assert.equal((await store.listDocumentQualityExperiments({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] })).length, 1);
     assert.equal(await store.getDocumentQualityExperiment(documentExperiment.experiment_id, { subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }), undefined);
     assert.equal(await store.hasDocumentQualityGateAttempt({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] }, "sha256:sealed-attempt"), true);
     assert.equal(await store.hasDocumentQualityGateAttempt({ subject: "bob", tenant_id: "tenant_b", roles: ["admin"] }, "sha256:sealed-attempt"), false);
+    assert.equal(await store.hasDocumentQualityGateAttempt({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] }, "sha256:new-candidate", "sha256:seen-holdout"), true);
+    assert.equal(await store.hasDocumentQualityGateAttempt({ subject: "alice", tenant_id: "tenant_a", roles: ["admin"] }, "sha256:new-candidate", "sha256:unseen-holdout"), false);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

@@ -216,7 +216,9 @@ test("evaluates multiple competing documents as one case without losing document
     base("vsm410-r1", "VSM-410 PWR-017 处理：检查标准电源模块"),
     base("vsm410-pro-r1", "VSM-410 Pro PWR-017 处理：检查增强电源模块"),
   ], "development");
-  assert.equal(report.gate_passed, true);
+  assert.equal(report.cases_passed, 1);
+  assert.equal(report.gate_passed, false); // Correct documents do not prove unannotated locator/noise metrics.
+  assert.deepEqual(report.coverage_gaps, ["expected_noise_removal", "retrieval_source_locator_accuracy"]);
   assert.equal(report.metrics.find((item) => item.name === "wrong_document_count")?.value, 0);
 });
 

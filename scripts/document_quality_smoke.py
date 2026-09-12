@@ -31,7 +31,7 @@ def main() -> None:
     catalog = request_json(base + "/api/v1/document-quality/catalog", token=login["access_token"])
     with urllib.request.urlopen(base + "/document-quality", timeout=30) as response:
         page = response.read().decode("utf-8")
-    if catalog.get("current_stage") not in {"sealed-holdout-gate", "regression-ready"} or catalog.get("dataset", {}).get("cases") != 21:
+    if catalog.get("current_stage") not in {"sealed-holdout-gate", "regression-ready", "evaluator-revalidation-required", "new-holdout-required"} or catalog.get("dataset", {}).get("cases") != 21:
         raise RuntimeError("document quality catalog is incomplete")
     if catalog.get("dataset", {}).get("splits", {}).get("holdout", {}).get("status") != "sealed":
         raise RuntimeError("the independent Holdout must remain sealed")

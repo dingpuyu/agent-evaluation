@@ -1,5 +1,7 @@
 # Document Quality Lab：真实文档流水线实验工作台
 
+当前使用 `document-quality/2`。本文首轮数值是历史实验记录，不是新版门禁验收结果。无覆盖指标不再给满分，旧 PASS 必须复核；详见[评测可信度修复记录](document-quality-evaluator-integrity-report.md)。
+
 ## 1. 解决的问题
 
 PDF、DOCX、XLSX 和扫描件进入 RAG 后，失败不一定发生在检索或 Prompt。OCR 漏行、版面顺序错误、Cleaner 误删、Chunk 切断答案单元，都会让下游 Agent 在“没有正确证据”的前提下回答。
@@ -32,8 +34,8 @@ RAG 无索引 Artifact
 
 当前开放 `Development + retrieval-sandbox`：
 
-1. Baseline 和 Candidate 必须包含 Development 的全部 4 条用例，不能只挑成功样本。
-2. 两组 `status、blocks、cleaning` 必须逐 Case 完全一致，只允许 Chunk 结果和 Profile 不同。
+1. Baseline 和 Candidate 必须包含当前 Snapshot 的全部 Development 用例，不能只挑成功样本；以 Catalog 返回数量为准。
+2. 两组原文件哈希、元数据、Document IR、Blocks、Cleaning 与非 Chunk 配置必须一致。仅排除 Chunk 结果、Chunk 参数及运行耗时等明确允许变化的字段。
 3. Artifact 必须 `indexed=false` 且 Retrieval 为空，未执行层不能伪装成通过。
 4. Body 上限 2 MiB，单个网页文件建议小于 900 KiB。
 5. Holdout 与 Regression 不接受交互式上传；Development 通过只产生“可申请盲测”的建议。
@@ -41,6 +43,8 @@ RAG 无索引 Artifact
 7. 物理 Collection 名由 RAG 服务生成，客户端不可指定；管理员鉴权、2 MiB/80 chunks/20 queries 上限和 pre-ANN 租户过滤不可绕过。
 8. Qwen Rerank 在评测路径使用 strict 模式，供应商失败会让实验失败，不能静默回退后仍宣称跑了 Qwen。
 9. 临时 Collection 在成功与异常路径都删除；返回值必须证明 `cleanup_completed=true` 和 `production_mutation=false`。
+10. 没有标注的指标返回 `null`、`not_evaluated`、`sample_count=0`。已选择评测层的硬指标缺少覆盖时 HOLD；不能用“没有失败”代替“验证通过”。
+11. 更换候选或评测器版本不能重开已消费的同租户 Holdout Snapshot。
 
 ## 4. 真实首轮实验
 
@@ -71,12 +75,14 @@ RAG 无索引 Artifact
 ```bash
 cd ../rag-evolution-lab
 
-OUTPUT=../agent-evaluation/data/document-quality/artifacts-400-100.json \
-MAX_RUNES=400 OVERLAP_RUNES=100 make document-quality-export
-
-OUTPUT=../agent-evaluation/data/document-quality/artifacts-700-80.json \
-MAX_RUNES=700 OVERLAP_RUNES=80 make document-quality-export
+BASELINE=../agent-evaluation/data/document-quality/artifacts-400-100.json \
+CANDIDATE=../agent-evaluation/data/document-quality/artifacts-700-80.json \
+MAX_RUNES=400 OVERLAP_RUNES=100 \
+CANDIDATE_MAX_RUNES=700 CANDIDATE_OVERLAP_RUNES=80 \
+make document-quality-export-pair
 ```
+
+该命令每份文档上传一次、解析一次，再从同一 Document IR 生成两套 Chunk。扫描件仍需要就绪的 OCR 服务；失败不可偷偷回退为原生文本并声称完成 OCR。不要分别重新生成两套 PDF/DOCX 来做严格对照。
 
 启动评测平台并导入：
 
@@ -111,7 +117,7 @@ Browser Artifact (request memory only)
 
 ## 7. 下一阶段
 
-1. 冻结 `700/80 + candidate_top_n=20`，只运行一次 Holdout；失败则回到 Development 形成新假设，不能查看盲测题后原地微调。
+1. 先补充独立的标注覆盖并用新版评测器验证 Development，再冻结候选；旧 Holdout 已消费，不得重用。新盲测失败则回到 Development 形成假设，不能查看盲测题后原地微调。
 2. 将已确认的 Chunk、OCR、Cleaner 和 Evidence Span Bad Case 写入 Regression，作为发布零退化门禁。
 3. 已完成来源页/Sheet/Cell Range/Heading Path 的 Retrieval 引用门禁；下一轮增加跨页表格与多定位 Golden。
 4. 接入人工审批，只有 Holdout 与 Regression 均通过才允许生成索引发布请求；评测平台自身仍不直接改生产。

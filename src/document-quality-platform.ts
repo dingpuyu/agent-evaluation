@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Identity } from "./contracts.js";
 import {
   compareDocumentQualityReports,
+  DOCUMENT_EVALUATOR_VERSION,
   DOCUMENT_FAILURE_LAYERS,
   evaluateDocumentQuality,
   type DocumentFailureLayer,
@@ -67,8 +68,8 @@ export interface DocumentQualityExperiment {
     candidate: RetrievalSandboxSummary;
   };
   frozen_profiles: {
-    baseline: { label: string; bundle_config: Record<string, unknown>; fingerprint: string };
-    candidate: { label: string; bundle_config: Record<string, unknown>; fingerprint: string };
+    baseline: { label: string; bundle_config: Record<string, unknown>; fingerprint: string; input_fingerprint?: string };
+    candidate: { label: string; bundle_config: Record<string, unknown>; fingerprint: string; input_fingerprint?: string };
   };
   release_gate?: {
     kind: "holdout-once";
@@ -288,13 +289,10 @@ function frozenProfile(label: string, bundle: DocumentArtifactBundle) {
   // in the promotion fingerprint. observed_parsers is corpus-dependent runtime
   // evidence: an OCR-heavy Development split and a native DOCX Holdout can run
   // on the same deployment without observing the same parser mix.
-  const controlledConfig = {
-    max_runes: bundleConfig.max_runes,
-    overlap_runes: bundleConfig.overlap_runes,
-    pipeline_release: bundleConfig.pipeline_release,
-  };
-  const fingerprint = `sha256:${createHash("sha256").update(canonical({ label, controlled_bundle_config: controlledConfig })).digest("hex")}`;
-  return { label, bundle_config: bundleConfig, fingerprint };
+  const { observed_parsers: _observed, ...controlledConfig } = bundleConfig;
+  const fingerprint = `sha256:${createHash("sha256").update(canonical({ evaluator_version: DOCUMENT_EVALUATOR_VERSION, controlled_bundle_config: controlledConfig })).digest("hex")}`;
+  const inputFingerprint = `sha256:${createHash("sha256").update(canonical(bundle.artifacts.map(stablePreChunkState).sort())).digest("hex")}`;
+  return { label, bundle_config: bundleConfig, fingerprint, input_fingerprint: inputFingerprint };
 }
 
 function frozenProfiles(interventionValue: DocumentQualityIntervention, baseline: DocumentArtifactBundle, candidate: DocumentArtifactBundle) {
@@ -305,16 +303,31 @@ function frozenProfiles(interventionValue: DocumentQualityIntervention, baseline
 }
 
 function stablePreChunkState(artifact: DocumentPipelineArtifact): string {
-  return JSON.stringify({
-    case_id: artifact.case_id,
-    document_id: artifact.document_id ?? artifact.case_id,
-    status: artifact.status,
-    blocks: artifact.blocks,
-    cleaning: artifact.cleaning,
-  });
+  // Fail closed for newly added artifact fields. Only known chunk-dependent
+  // fields and measured timing are excluded from the invariant comparison.
+  const { chunks: _chunks, config_fingerprint: _fingerprint, runtime: _runtime, pipeline_config: pipelineConfig, ...invariants } = artifact;
+  const { max_runes: _max, overlap_runes: _overlap, ...pipeline } = pipelineConfig ?? {};
+  return canonical({ ...invariants, pipeline_config: pipeline });
 }
 
 function assertSingleVariableExperiment(baseline: DocumentArtifactBundle, candidate: DocumentArtifactBundle): void {
+  const invariantConfig = (bundle: DocumentArtifactBundle) => {
+    const { max_runes: _max, overlap_runes: _overlap, ...rest } = bundle.config ?? {};
+    return canonical({ source: bundle.source, config: rest });
+  };
+  if (invariantConfig(baseline) !== invariantConfig(candidate)) throw new Error("non-chunk configuration differs; comparison is not a single-variable experiment");
+  for (const bundle of [baseline, candidate]) {
+    const max = bundle.config?.max_runes;
+    const overlap = bundle.config?.overlap_runes;
+    if (!Number.isInteger(max) || !Number.isInteger(overlap) || Number(max) < 100 || Number(max) > 2000 || Number(overlap) < 0 || Number(overlap) >= Number(max) / 2) {
+      throw new Error("invalid chunk configuration: max_runes 100-2000; overlap_runes must be nonnegative and less than half max_runes");
+    }
+    for (const artifact of bundle.artifacts) {
+      if (artifact.pipeline_config && (artifact.pipeline_config.max_runes !== max || artifact.pipeline_config.overlap_runes !== overlap)) {
+        throw new Error("artifact pipeline configuration does not match the declared chunk profile");
+      }
+    }
+  }
   const key = (item: DocumentPipelineArtifact) => `${item.case_id}\u0000${item.document_id ?? item.case_id}`;
   const candidateByID = new Map(candidate.artifacts.map((item) => [key(item), item]));
   if (baseline.artifacts.length !== candidate.artifacts.length) throw new Error("baseline and candidate must contain the same document artifacts");
@@ -486,6 +499,9 @@ export function prepareDocumentQualityHoldoutGate(input: {
     throw new Error("holdout split is exposed and cannot be reused for promotion");
   }
   const parent = input.parent_experiment;
+  if (parent.candidate_report.evaluator_version !== DOCUMENT_EVALUATOR_VERSION || parent.baseline_report.evaluator_version !== DOCUMENT_EVALUATOR_VERSION) {
+    throw new Error("parent experiment requires re-evaluation with the current evaluator version");
+  }
   if (parent.dataset.split !== "development" || parent.execution_stage !== "retrieval-sandbox" || parent.promotion_status !== "retrieval_passed") {
     throw new Error("holdout requires a passed development retrieval experiment");
   }

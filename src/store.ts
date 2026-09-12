@@ -197,13 +197,14 @@ export class RunStore {
       .slice(0, Math.max(1, Math.min(limit, 100)));
   }
 
-  async hasDocumentQualityGateAttempt(identity: Identity, attemptKey: string): Promise<boolean> {
+  async hasDocumentQualityGateAttempt(identity: Identity, attemptKey: string, snapshot?: string, tenantID = identity.tenant_id): Promise<boolean> {
     await mkdir(this.documentQualityExperimentsDir, { recursive: true });
     const entries = (await readdir(this.documentQualityExperimentsDir)).filter((name) => /^docqexp_[a-f0-9]{32}\.json$/.test(name));
     for (const name of entries) {
       const item = JSON.parse(await readFile(join(this.documentQualityExperimentsDir, name), "utf8")) as DocumentQualityExperiment;
       const canRead = identity.roles.includes("platform_admin") || item.tenant_id === identity.tenant_id;
-      if (canRead && item.release_gate?.attempt_key === attemptKey) return true;
+      if (canRead && item.release_gate && (item.release_gate.attempt_key === attemptKey
+        || (snapshot !== undefined && item.tenant_id === tenantID && item.dataset.snapshot === snapshot))) return true;
     }
     return false;
   }

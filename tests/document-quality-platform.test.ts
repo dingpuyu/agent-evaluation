@@ -215,7 +215,7 @@ function sandboxResult(request: RetrievalSandboxRequest): RetrievalSandboxRun {
   };
 }
 
-test("runs a frozen one-time Holdout gate and blocks non-ready artifacts from indexing", async () => {
+test("holds the existing frozen Holdout when source-locator and noise coverage are absent", async () => {
   const dataset = await loadDocumentQualityDataset("./datasets/raglab-document-quality-v1.json");
   dataset.split_policy.holdout.status = "sealed";
   const developmentCandidate = await candidateBundle();
@@ -254,12 +254,10 @@ test("runs a frozen one-time Holdout gate and blocks non-ready artifacts from in
     candidate_retrieval: sandboxResult(prepared.candidate_request),
   });
   assert.equal(result.dataset.split, "holdout");
-  assert.equal(result.promotion_status, "holdout_passed", JSON.stringify({
-    failed_cases: result.candidate_report.failed_cases,
-    layer_failures: result.candidate_report.layer_failures,
-    results: result.candidate_report.results,
-  }));
-  assert.equal(result.release_gate?.verdict, "pass");
+  assert.equal(result.candidate_report.cases_passed, 4);
+  assert.equal(result.promotion_status, "hold");
+  assert.deepEqual(result.candidate_report.coverage_gaps, ["expected_noise_removal", "retrieval_source_locator_accuracy"]);
+  assert.equal(result.release_gate?.verdict, "fail");
   assert.equal(result.candidate_report.metrics.find((item) => item.name === "unsafe_publish_count")?.value, 0);
   assert.equal(result.retrieval_sandbox?.candidate.chunks_indexed, 8);
   dataset.split_policy.holdout.status = "exposed";

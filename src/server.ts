@@ -14,7 +14,7 @@ import {
   prepareDocumentQualityRetrievalExperiment,
   runDocumentQualityExperiment,
 } from "./document-quality-platform.js";
-import { loadDocumentQualityDataset } from "./document-quality.js";
+import { DOCUMENT_EVALUATOR_VERSION, loadDocumentQualityDataset } from "./document-quality.js";
 import { runPromptExperiment } from "./experiment.js";
 import { buildEvaluationPlan, comparePilotRuns, createPilotRun, executePilotRun, platformOverview, RAGLAB_TARGET } from "./platform.js";
 import { evaluateRagBadCase, RAG_BAD_CASE_SUITE_ID, RAG_BAD_CASE_SUITE_VERSION } from "./runner.js";
@@ -166,13 +166,17 @@ const server = createServer(async (request, response) => {
       const { identity } = await adminContext(request);
       const dataset = await loadDocumentQualityDataset(config.documentQualityDatasetPath);
       const experiments = await store.listDocumentQualityExperiments(identity, 20);
-      const holdoutPassed = experiments.some((item) => item.dataset.snapshot === dataset.snapshot_id
+      const currentExperiments = experiments.filter(item => item.candidate_report.evaluator_version === DOCUMENT_EVALUATOR_VERSION && item.baseline_report.evaluator_version === DOCUMENT_EVALUATOR_VERSION);
+      const holdoutPassed = currentExperiments.some((item) => item.dataset.snapshot === dataset.snapshot_id
         && item.dataset.split === "holdout" && item.promotion_status === "holdout_passed");
+      const holdoutConsumed = await store.hasDocumentQualityGateAttempt(identity, "", dataset.snapshot_id);
+      const legacyResults = experiments.some(item => item.candidate_report.evaluator_version !== DOCUMENT_EVALUATOR_VERSION);
       const currentStage = dataset.split_policy.holdout.status === "exposed"
         ? "new-holdout-required"
-        : holdoutPassed ? "regression-ready" : "sealed-holdout-gate";
+        : holdoutPassed ? "regression-ready" : legacyResults ? "evaluator-revalidation-required" : "sealed-holdout-gate";
       writeJSON(response, 200, {
         suite_id: dataset.suite_id,
+        evaluator_version: DOCUMENT_EVALUATOR_VERSION,
         dataset: {
           id: dataset.dataset_id,
           version: dataset.version,
@@ -186,7 +190,7 @@ const server = createServer(async (request, response) => {
             case_count: policy.case_count,
             prompt_visible: policy.prompt_visible,
             status: policy.status ?? (name === "holdout" ? "sealed" : "development"),
-            attempt_status: name === "holdout" ? (holdoutPassed ? "consumed_pass" : "available") : undefined,
+            attempt_status: name === "holdout" ? (holdoutPassed ? "consumed_pass" : holdoutConsumed ? "consumed_requires_new_snapshot" : "available") : undefined,
             interactive_access: name === "development" ? "enabled" : "locked",
           }])),
         },
@@ -194,11 +198,13 @@ const server = createServer(async (request, response) => {
         pipeline: ["OCR", "Layout", "Cleaner", "Chunk", "Retrieval"],
         current_stage: currentStage,
         guardrails: [
+          "没有标注覆盖的指标显示未评测；已选评测层的硬指标缺少覆盖时，不允许晋级",
+          "旧版报告保留用于审计，不能授权新版门禁；需重新执行 Development，不自动重用已曝光 Holdout",
           ...(dataset.split_policy.holdout.status === "exposed" ? ["当前 Holdout 已曝光并冻结，必须创建新的未见数据后才能再次晋级"] : []),
           ...(holdoutPassed ? ["当前 Snapshot 的一次性 Holdout 已通过并冻结，下一步只能执行 Regression，不能再次消费盲测"] : []),
           "Development 可反复调参；Holdout 只能引用已通过的 Development Retrieval 由服务端门禁触发，Regression 暂不开放",
-          "同一 Candidate Fingerprint 与 Dataset Snapshot 只允许一次 Holdout 质量判定；基础设施失败才可重试",
-          "Baseline 与 Candidate 必须拥有相同的 OCR、版面和清洗产物",
+          "同一租户与 Dataset Snapshot 只允许一次 Holdout 质量判定；更换候选或评测器不能重开，基础设施失败才可重试",
+          "Baseline 与 Candidate 的原文件、元数据、Document IR、清洗产物和非 Chunk 配置必须一致",
           "原始 Blocks/Chunks 仅在内存评测，持久化记录只保留必要的 Golden 检查摘要",
           "Retrieval 使用服务端生成的临时 Milvus Collection，Qwen/Milvus/Rerank 完成后必须清理",
           "Development 通过只代表可申请盲测，不代表可直接发布生产",
@@ -227,6 +233,7 @@ const server = createServer(async (request, response) => {
       const parent = await store.getDocumentQualityExperiment(parentID, identity);
       if (!parent) throw new UpstreamError(404, "parent development experiment was not found or is not accessible");
       let attemptKey = "";
+      let gateAcquired = false;
       try {
         const dataset = await loadDocumentQualityDataset(config.documentQualityDatasetPath);
         const prepared = prepareDocumentQualityHoldoutGate({
@@ -236,11 +243,14 @@ const server = createServer(async (request, response) => {
           baseline_artifacts: body.baseline_artifacts,
           candidate_artifacts: body.candidate_artifacts,
         });
-        attemptKey = prepared.attempt_key;
-        if (activeDocumentQualityGates.has(attemptKey) || await store.hasDocumentQualityGateAttempt(identity, attemptKey)) {
-          throw new UpstreamError(409, "this frozen candidate already consumed its one quality-result Holdout attempt");
+        attemptKey = `${parent.tenant_id}:${parent.dataset.snapshot}`;
+        if (activeDocumentQualityGates.has(attemptKey) || await store.hasDocumentQualityGateAttempt(identity, prepared.attempt_key, parent.dataset.snapshot, parent.tenant_id)) {
+          throw new UpstreamError(409, "this dataset snapshot already consumed its Holdout attempt; changing the candidate or evaluator cannot reopen it");
         }
+        // The store check yields; another request may have acquired the lock.
+        if (activeDocumentQualityGates.has(attemptKey)) throw new UpstreamError(409, "Holdout is already running for this snapshot");
         activeDocumentQualityGates.add(attemptKey);
+        gateAcquired = true;
         const baselineRetrieval = await adapter.runDocumentRetrievalSandbox(prepared.baseline_request);
         const candidateRetrieval = await adapter.runDocumentRetrievalSandbox(prepared.candidate_request);
         const experiment = completeDocumentQualityHoldoutGate({
@@ -256,7 +266,7 @@ const server = createServer(async (request, response) => {
         if (error instanceof UpstreamError) throw error;
         throw new UpstreamError(400, error instanceof Error ? error.message : "invalid document quality Holdout gate");
       } finally {
-        if (attemptKey) activeDocumentQualityGates.delete(attemptKey);
+        if (gateAcquired) activeDocumentQualityGates.delete(attemptKey);
       }
       return;
     }
